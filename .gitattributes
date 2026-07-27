@@ -1,0 +1,9 @@
+* text=auto
+*.cs text diff=csharp
+*.csproj text
+*.md text
+*.ps1 text eol=crlf
+*.py text
+*.svg text
+*.ico binary
+*.exe binary

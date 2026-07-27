@@ -1,0 +1,15 @@
+bin/
+obj/
+artifacts/
+publish-*/
+.vs/
+*.user
+*.suo
+*.pdb
+AI Audio Launcher.settings.json
+AI Audio Launcher.models.json
+launcher.settings.json
+models.json
+logs/
+downloads/
+backups/
