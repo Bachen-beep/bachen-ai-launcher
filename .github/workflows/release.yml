@@ -130,12 +130,12 @@ jobs:
           [IO.File]::WriteAllLines((Join-Path $PWD "artifacts\SHA256SUMS.txt"), $checksums)
 
       - name: Attest standalone launcher provenance
-        uses: actions/attest-build-provenance@v2
+        uses: actions/attest-build-provenance@v4
         with:
           subject-path: artifacts/BaChen.AI.Launcher.exe
 
       - name: Attest installer provenance
-        uses: actions/attest-build-provenance@v2
+        uses: actions/attest-build-provenance@v4
         with:
           subject-path: artifacts/installer/BaChen-AI-Launcher-Setup-${{ steps.version.outputs.version }}.exe
 
