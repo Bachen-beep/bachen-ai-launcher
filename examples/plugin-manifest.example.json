@@ -1,0 +1,32 @@
+{
+  "schemaVersion": 2,
+  "id": "example-image-plugin",
+  "displayName": "Example Image Plugin",
+  "version": "1.0.0",
+  "publisher": "Example Publisher",
+  "category": "Image generation",
+  "description": "Example signed plugin package for BaChen AI Launcher.",
+  "executable": "runtime/python.exe",
+  "arguments": "app.py --host 127.0.0.1 --port {port}",
+  "port": 7870,
+  "recommendedVramMiB": 6144,
+  "recommendedSystemMemoryMiB": 16384,
+  "isHighVram": false,
+  "requiredFiles": [
+    "app.py",
+    "runtime/python.exe"
+  ],
+  "dependencies": [
+    "cuda",
+    "file:app.py"
+  ],
+  "gitHubRepository": "owner/repository",
+  "gitHubBranch": "main",
+  "packageUrl": "https://example.com/example-image-plugin-1.0.0.zip",
+  "packageSha256": "REPLACE_WITH_64_CHARACTER_SHA256",
+  "signature": {
+    "keyId": "example-publisher-2026",
+    "algorithm": "RSA-SHA256",
+    "value": "REPLACE_WITH_BASE64_SIGNATURE"
+  }
+}

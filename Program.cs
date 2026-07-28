@@ -12,10 +12,19 @@ namespace BaChenAiLauncher;
 internal static class Program
 {
     [STAThread]
-    private static void Main()
+    private static int Main(string[] args)
     {
+        if (args.Length >= 2 && args[0].Equals("--self-test", StringComparison.OrdinalIgnoreCase))
+        {
+            return LauncherSelfTests.RunAsync(args[1]).GetAwaiter().GetResult();
+        }
+        if (args.Length >= 3 && args[0].Equals("--canonicalize-manifest", StringComparison.OrdinalIgnoreCase))
+        {
+            return LauncherSelfTests.WriteCanonicalManifestPayloadAsync(args[1], args[2]).GetAwaiter().GetResult();
+        }
         ApplicationConfiguration.Initialize();
         Application.Run(new LauncherForm());
+        return 0;
     }
 }
 
@@ -779,7 +788,8 @@ internal sealed record ServiceProfile(
     bool IsMedium = false,
     string[]? RequiredFiles = null,
     int RecommendedVramMiB = 0,
-    int RecommendedSystemMemoryMiB = 4096);
+    int RecommendedSystemMemoryMiB = 4096,
+    string[]? Dependencies = null);
 
 internal sealed record GitHubUpdateSource(
     string DisplayName,
@@ -800,7 +810,12 @@ internal sealed record SourceUpdateCheck(
     bool HasLocalBaseline);
 
 internal sealed record UpdateBackupEntry(GitHubUpdateSource Source, string Path, DateTime LastWriteTime);
-internal sealed record UpdateBackupMetadata(string DisplayName, string? PreviousCommitSha, DateTimeOffset CreatedAt);
+internal sealed record UpdateBackupMetadata(
+    string DisplayName,
+    string? PreviousCommitSha,
+    DateTimeOffset CreatedAt,
+    string? PreviousVersion = null,
+    string[]? PreviousDependencies = null);
 internal sealed record LauncherLogEntry(DateTime Timestamp, string Message, string? ServiceName, bool IsError);
 
 internal enum LauncherLogFilter
@@ -867,7 +882,7 @@ internal sealed class LauncherSettings
 
 internal sealed class LauncherModelCatalog
 {
-    public int SchemaVersion { get; set; } = 1;
+    public int SchemaVersion { get; set; } = 2;
     public List<LauncherModelDefinition> Models { get; set; } = [];
 }
 
@@ -884,8 +899,15 @@ internal sealed class LauncherModelDefinition
     public int RecommendedVramMiB { get; set; } = 4096;
     public int RecommendedSystemMemoryMiB { get; set; } = 8192;
     public string[] RequiredFiles { get; set; } = [];
+    public string[] Dependencies { get; set; } = [];
     public string GitHubRepository { get; set; } = string.Empty;
     public string GitHubBranch { get; set; } = "main";
+    public string InstalledVersion { get; set; } = "local";
+    public string Publisher { get; set; } = string.Empty;
+    public string SigningKeyId { get; set; } = string.Empty;
+    public string PackageSha256 { get; set; } = string.Empty;
+    public bool IsManifestTrusted { get; set; }
+    public string TrustSource { get; set; } = "LocalUser";
     public bool IsBuiltIn { get; set; }
     public bool IsHighVram { get; set; }
 }
@@ -901,12 +923,17 @@ internal sealed class LauncherForm : Form
     private static readonly string ModelCatalogPath = Path.Combine(
         LauncherPaths.UserConfigDirectory,
         "models.json");
+    private static readonly string TrustedPublishersPath = Path.Combine(
+        LauncherPaths.UserConfigDirectory,
+        "trusted-publishers.json");
     private static readonly string LauncherVersion =
         typeof(LauncherForm).Assembly.GetName().Version?.ToString(3) ?? "0.9.0";
 
     private static readonly HttpClient GitHubClient = CreateGitHubClient();
+    private readonly PluginPackageService _pluginPackageService = new(GitHubClient);
     private LauncherSettings _settings;
     private LauncherModelCatalog _modelCatalog = new();
+    private TrustedPublisherStore _trustedPublishers = new();
     private GitHubUpdateSource[] _updateSources = [];
 
     private readonly SafeTextLabel _statusLabel = new();
@@ -927,6 +954,9 @@ internal sealed class LauncherForm : Form
     private ParagraphLabel? _detailRootLabel;
     private SafeTextLabel? _detailPortLabel;
     private SafeTextLabel? _detailMemoryLabel;
+    private SafeTextLabel? _detailVersionLabel;
+    private ParagraphLabel? _detailDependencyLabel;
+    private SafeTextLabel? _detailTrustLabel;
     private SafeTextLabel? _logSummaryLabel;
     private SafeTextLabel? _pluginCountLabel;
     private FlowLayoutPanel? _stableModePanel;
@@ -968,6 +998,7 @@ internal sealed class LauncherForm : Form
         EnsureDataDirectories(_settings);
         SaveSettings(_settings);
         _modelCatalog = LoadModelCatalog();
+        _trustedPublishers = TrustedPublisherStoreService.Load(TrustedPublishersPath);
         MigrateRenamedCatalogPaths(_modelCatalog);
         SyncBuiltInCatalogEntries();
         SaveModelCatalog(_modelCatalog);
@@ -1026,7 +1057,8 @@ internal sealed class LauncherForm : Form
             _settings.WooshPort,
             RequiredFiles: ["gradio_Woosh-DFlow.py", "checkpoints"],
             RecommendedVramMiB: 6800,
-            RecommendedSystemMemoryMiB: 16384);
+            RecommendedSystemMemoryMiB: 16384,
+            Dependencies: ["python>=3.10", "cuda"]);
 
         _smallSfx = CreateStableProfile("Stable Audio 3 · small-sfx", "Stable Audio 3 短音效生成", "small-sfx");
         _smallMusic = CreateStableProfile("Stable Audio 3 · small-music", "Stable Audio 3 音乐生成", "small-music");
@@ -1041,7 +1073,8 @@ internal sealed class LauncherForm : Form
             _settings.IndexTtsPort,
             RequiredFiles: ["tools/windows_launcher.ps1", "webui.py", "checkpoints"],
             RecommendedVramMiB: 7500,
-            RecommendedSystemMemoryMiB: 16384);
+            RecommendedSystemMemoryMiB: 16384,
+            Dependencies: ["python>=3.10", "cuda"]);
     }
 
     private IEnumerable<LauncherModelDefinition> CustomModelDefinitions()
@@ -1065,7 +1098,8 @@ internal sealed class LauncherForm : Form
             definition.IsHighVram,
             definition.RequiredFiles ?? [],
             definition.RecommendedVramMiB,
-            definition.RecommendedSystemMemoryMiB);
+            definition.RecommendedSystemMemoryMiB,
+            definition.Dependencies ?? []);
     }
 
     private static string ExpandModelValue(string value, string root, int port)
@@ -1142,7 +1176,8 @@ internal sealed class LauncherForm : Form
             isMedium,
             ["run_gradio.py", "stable_audio_3"],
             isMedium ? 8800 : 2200,
-            isMedium ? 16384 : 8192);
+            isMedium ? 16384 : 8192,
+            ["python>=3.10", "cuda"]);
     }
 
     private static void MigrateLegacyConfiguration()
@@ -1398,17 +1433,19 @@ internal sealed class LauncherForm : Form
     {
         return new LauncherModelCatalog
         {
+            SchemaVersion = 2,
             Models =
             [
-                new LauncherModelDefinition { Id = "woosh-dflow", DisplayName = "Woosh-DFlow", Description = "Text to sound effects and ambience", Category = "Sound design", RootDirectory = _settings.WooshRoot, Port = _settings.WooshPort, RecommendedVramMiB = 6800, RecommendedSystemMemoryMiB = 16384, RequiredFiles = ["gradio_Woosh-DFlow.py", "checkpoints"], GitHubRepository = "SonyResearch/Woosh", IsBuiltIn = true },
-                new LauncherModelDefinition { Id = "stable-audio-3", DisplayName = "Stable Audio 3", Description = "Sound effects, music, and medium generation", Category = "Audio generation", RootDirectory = _settings.StableRoot, Port = _settings.StablePort, RecommendedVramMiB = 2200, RecommendedSystemMemoryMiB = 8192, RequiredFiles = ["run_gradio.py", "stable_audio_3"], GitHubRepository = "Stability-AI/stable-audio-3", IsBuiltIn = true },
-                new LauncherModelDefinition { Id = "indextts2", DisplayName = "IndexTTS2", Description = "Character voice and emotional speech", Category = "Character voice", RootDirectory = _settings.IndexTtsRoot, Port = _settings.IndexTtsPort, RecommendedVramMiB = 7500, RecommendedSystemMemoryMiB = 16384, RequiredFiles = ["tools/windows_launcher.ps1", "webui.py", "checkpoints"], GitHubRepository = "index-tts/index-tts", IsBuiltIn = true }
+                new LauncherModelDefinition { Id = "woosh-dflow", DisplayName = "Woosh-DFlow", Description = "Text to sound effects and ambience", Category = "Sound design", RootDirectory = _settings.WooshRoot, Port = _settings.WooshPort, RecommendedVramMiB = 6800, RecommendedSystemMemoryMiB = 16384, RequiredFiles = ["gradio_Woosh-DFlow.py", "checkpoints"], Dependencies = ["python>=3.10", "cuda"], GitHubRepository = "SonyResearch/Woosh", InstalledVersion = "built-in", Publisher = "SonyResearch", TrustSource = "BuiltIn", IsManifestTrusted = true, IsBuiltIn = true },
+                new LauncherModelDefinition { Id = "stable-audio-3", DisplayName = "Stable Audio 3", Description = "Sound effects, music, and medium generation", Category = "Audio generation", RootDirectory = _settings.StableRoot, Port = _settings.StablePort, RecommendedVramMiB = 2200, RecommendedSystemMemoryMiB = 8192, RequiredFiles = ["run_gradio.py", "stable_audio_3"], Dependencies = ["python>=3.10", "cuda"], GitHubRepository = "Stability-AI/stable-audio-3", InstalledVersion = "built-in", Publisher = "Stability AI", TrustSource = "BuiltIn", IsManifestTrusted = true, IsBuiltIn = true },
+                new LauncherModelDefinition { Id = "indextts2", DisplayName = "IndexTTS2", Description = "Character voice and emotional speech", Category = "Character voice", RootDirectory = _settings.IndexTtsRoot, Port = _settings.IndexTtsPort, RecommendedVramMiB = 7500, RecommendedSystemMemoryMiB = 16384, RequiredFiles = ["tools/windows_launcher.ps1", "webui.py", "checkpoints"], Dependencies = ["python>=3.10", "cuda"], GitHubRepository = "index-tts/index-tts", InstalledVersion = "built-in", Publisher = "IndexTTS", TrustSource = "BuiltIn", IsManifestTrusted = true, IsBuiltIn = true }
             ]
         };
     }
 
     private static void SaveModelCatalog(LauncherModelCatalog catalog)
     {
+        catalog.SchemaVersion = 2;
         var json = JsonSerializer.Serialize(catalog, new JsonSerializerOptions { WriteIndented = true });
         File.WriteAllText(ModelCatalogPath, json, Encoding.UTF8);
     }
@@ -1432,7 +1469,15 @@ internal sealed class LauncherForm : Form
             existing.RecommendedVramMiB = definition.RecommendedVramMiB;
             existing.RecommendedSystemMemoryMiB = definition.RecommendedSystemMemoryMiB;
             existing.RequiredFiles = definition.RequiredFiles;
+            existing.Dependencies = definition.Dependencies;
             existing.GitHubRepository = definition.GitHubRepository;
+            if (string.IsNullOrWhiteSpace(existing.InstalledVersion) || existing.InstalledVersion == "local")
+            {
+                existing.InstalledVersion = definition.InstalledVersion;
+            }
+            existing.Publisher = definition.Publisher;
+            existing.TrustSource = definition.TrustSource;
+            existing.IsManifestTrusted = true;
             existing.IsBuiltIn = true;
         }
     }
@@ -1764,7 +1809,7 @@ internal sealed class LauncherForm : Form
         return changed.ToArray();
     }
 
-    private static async Task<string> ApplySourceUpdateAsync(SourceUpdateCheck check)
+    private async Task<string> ApplySourceUpdateAsync(SourceUpdateCheck check)
     {
         var source = check.Source;
         var tempRoot = Path.Combine(Path.GetTempPath(), "bachen-ai-update-" + Guid.NewGuid().ToString("N"));
@@ -1810,13 +1855,19 @@ internal sealed class LauncherForm : Form
             var safeName = source.DisplayName.Replace(' ', '-');
             var backupZip = Path.Combine(backupsRoot, $"{safeName}-{DateTime.Now:yyyyMMdd-HHmmss}.zip");
             var previousState = LoadUpdateState(source);
+            var definition = _modelCatalog.Models.FirstOrDefault(model => Path.GetFullPath(model.RootDirectory).Equals(Path.GetFullPath(source.DeploymentRoot), StringComparison.OrdinalIgnoreCase));
             var metadata = JsonSerializer.Serialize(
-                new UpdateBackupMetadata(source.DisplayName, previousState?.CommitSha, DateTimeOffset.Now),
+                new UpdateBackupMetadata(source.DisplayName, previousState?.CommitSha, DateTimeOffset.Now, definition?.InstalledVersion, definition?.Dependencies),
                 new JsonSerializerOptions { WriteIndented = true });
             File.WriteAllText(Path.Combine(backupStaging, ".launcher-backup-metadata.json"), metadata, Encoding.UTF8);
             ZipFile.CreateFromDirectory(backupStaging, backupZip, CompressionLevel.Optimal, false);
 
             SaveUpdateState(source, check.LatestSha);
+            if (definition is not null)
+            {
+                definition.InstalledVersion = $"git-{check.LatestSha[..Math.Min(8, check.LatestSha.Length)]}";
+                SaveModelCatalog(_modelCatalog);
+            }
             return backupZip;
         }
         finally
@@ -1932,6 +1983,10 @@ internal sealed class LauncherForm : Form
             {
                 missing.Add(relative);
             }
+        }
+        foreach (var dependency in PluginDependencyChecker.Check(profile.Dependencies, profile.WorkingDirectory).Where(result => result.IsEnforced && !result.IsSatisfied))
+        {
+            missing.Add($"{dependency.Requirement}: {dependency.Details}");
         }
         return missing;
     }
@@ -2176,6 +2231,19 @@ internal sealed class LauncherForm : Form
             {
                 File.Delete(UpdateStatePath(selected.Source));
             }
+            var definition = _modelCatalog.Models.FirstOrDefault(model => Path.GetFullPath(model.RootDirectory).Equals(Path.GetFullPath(selected.Source.DeploymentRoot), StringComparison.OrdinalIgnoreCase));
+            if (definition is not null)
+            {
+                if (!string.IsNullOrWhiteSpace(metadata?.PreviousVersion))
+                {
+                    definition.InstalledVersion = metadata.PreviousVersion;
+                }
+                if (metadata?.PreviousDependencies is not null)
+                {
+                    definition.Dependencies = metadata.PreviousDependencies;
+                }
+                SaveModelCatalog(_modelCatalog);
+            }
             AppendLog(L($"已恢复备份：{selected.Path}", $"Backup restored: {selected.Path}"));
             MessageBox.Show(L("备份恢复完成。建议运行环境自检后再启动模型。", "Backup restored. Run environment check before launching a model."), L("恢复完成", "Restore complete"), MessageBoxButtons.OK, MessageBoxIcon.Information);
         }
@@ -2208,14 +2276,344 @@ internal sealed class LauncherForm : Form
     private ContextMenuStrip CreateMaintenanceMenu()
     {
         var menu = new ContextMenuStrip();
+        menu.Items.Add(L("安装签名插件包", "Install signed plugin"), null, async (_, _) => await ShowInstallPluginWizardAsync());
+        menu.Items.Add(L("卸载所选插件", "Uninstall selected plugin"), null, (_, _) => UninstallSelectedPlugin());
+        menu.Items.Add(L("受信任发布者", "Trusted publishers"), null, (_, _) => ShowTrustedPublishersDialog());
+        menu.Items.Add(new ToolStripSeparator());
         menu.Items.Add(L("添加新模型", "Add new model"), null, (_, _) => ShowAddModelDialog());
         menu.Items.Add(L("运行环境自检", "Run environment check"), null, (_, _) => ShowEnvironmentReport());
         menu.Items.Add(L("配置模型目录与端口", "Configure paths and ports"), null, (_, _) => ShowSettingsDialog());
         menu.Items.Add(L("恢复源码备份", "Restore source backup"), null, async (_, _) => await RestoreBackupAsync());
+        menu.Items.Add(L("恢复插件版本", "Restore plugin version"), null, (_, _) => RestorePluginVersion());
         menu.Items.Add(L("打开日志目录", "Open logs folder"), null, (_, _) => OpenLogsFolder());
         menu.Items.Add(new ToolStripSeparator());
         menu.Items.Add(L($"启动器版本 {LauncherVersion}", $"Launcher version {LauncherVersion}"))!.Enabled = false;
         return menu;
+    }
+
+    private void RestorePluginVersion()
+    {
+        var backupsRoot = Path.Combine(_settings.DataRoot, "backups", "plugin-installs");
+        var backupRoots = new[] { backupsRoot, Path.Combine(_settings.DataRoot, "backups", "uninstalled-plugins") };
+        var backups = backupRoots.Where(Directory.Exists)
+            .SelectMany(root => Directory.EnumerateDirectories(root))
+                .Select(path => (Path: path, Metadata: Path.Combine(path, ".bachen-plugin-definition.json")))
+                .Where(item => File.Exists(item.Metadata))
+                .OrderByDescending(item => Directory.GetLastWriteTime(item.Path))
+                .ToList();
+        if (backups.Count == 0)
+        {
+            MessageBox.Show(L("没有找到可恢复的插件版本。", "No restorable plugin versions were found."), L("恢复插件版本", "Restore plugin version"), MessageBoxButtons.OK, MessageBoxIcon.Information);
+            return;
+        }
+
+        using var picker = new Form { Text = L("选择插件版本", "Choose plugin version"), StartPosition = FormStartPosition.CenterParent, FormBorderStyle = FormBorderStyle.FixedDialog, ClientSize = new Size(760, 180), MaximizeBox = false, MinimizeBox = false, ShowInTaskbar = false };
+        var combo = new ComboBox { DropDownStyle = ComboBoxStyle.DropDownList, Location = new Point(24, 40), Size = new Size(712, 34) };
+        var definitions = new List<LauncherModelDefinition>();
+        foreach (var backup in backups)
+        {
+            var definition = JsonSerializer.Deserialize<LauncherModelDefinition>(File.ReadAllText(backup.Metadata)) ?? new LauncherModelDefinition();
+            definitions.Add(definition);
+            combo.Items.Add($"{definition.DisplayName}  |  {definition.InstalledVersion}  |  {Directory.GetLastWriteTime(backup.Path):yyyy-MM-dd HH:mm:ss}");
+        }
+        combo.SelectedIndex = 0;
+        picker.Controls.Add(combo);
+        picker.Controls.Add(new Button { Text = L("取消", "Cancel"), DialogResult = DialogResult.Cancel, Location = new Point(500, 112), Size = new Size(110, 36) });
+        picker.Controls.Add(new Button { Text = L("恢复", "Restore"), DialogResult = DialogResult.OK, Location = new Point(624, 112), Size = new Size(110, 36) });
+        if (picker.ShowDialog(this) != DialogResult.OK)
+        {
+            return;
+        }
+
+        var selectedBackup = backups[combo.SelectedIndex].Path;
+        var restoredDefinition = definitions[combo.SelectedIndex];
+        var targetRoot = Path.GetFullPath(restoredDefinition.RootDirectory);
+        var managedRoot = Path.GetFullPath(Path.Combine(_settings.DataRoot, "plugins")) + Path.DirectorySeparatorChar;
+        if (!targetRoot.StartsWith(managedRoot, StringComparison.OrdinalIgnoreCase))
+        {
+            MessageBox.Show(L("备份目标不在托管插件目录内，已阻止恢复。", "The backup target is outside managed plugin storage; restore was blocked."), L("路径验证失败", "Path validation failed"), MessageBoxButtons.OK, MessageBoxIcon.Error);
+            return;
+        }
+        if (MessageBox.Show(L($"恢复 {restoredDefinition.DisplayName} {restoredDefinition.InstalledVersion}？当前版本也会保留为备份。", $"Restore {restoredDefinition.DisplayName} {restoredDefinition.InstalledVersion}? The current version will also be retained as a backup."), L("确认恢复", "Confirm restore"), MessageBoxButtons.YesNo, MessageBoxIcon.Warning) != DialogResult.Yes)
+        {
+            return;
+        }
+
+        string? currentBackup = null;
+        try
+        {
+            var currentDefinition = _modelCatalog.Models.FirstOrDefault(model => model.Id.Equals(restoredDefinition.Id, StringComparison.OrdinalIgnoreCase));
+            if (_activeService is not null && _activeService.WorkingDirectory.Equals(targetRoot, StringComparison.OrdinalIgnoreCase))
+            {
+                StopKnownServices();
+            }
+            if (Directory.Exists(targetRoot))
+            {
+                currentBackup = Path.Combine(backupsRoot, $"{restoredDefinition.Id}-{DateTime.Now:yyyyMMdd-HHmmss}-rollback");
+                if (currentDefinition is not null)
+                {
+                    File.WriteAllText(Path.Combine(targetRoot, ".bachen-plugin-definition.json"), JsonSerializer.Serialize(currentDefinition, new JsonSerializerOptions { WriteIndented = true }), Encoding.UTF8);
+                }
+                Directory.Move(targetRoot, currentBackup);
+            }
+            Directory.Move(selectedBackup, targetRoot);
+            var restoredMetadata = Path.Combine(targetRoot, ".bachen-plugin-definition.json");
+            if (File.Exists(restoredMetadata))
+            {
+                File.Delete(restoredMetadata);
+            }
+            if (currentDefinition is not null)
+            {
+                _modelCatalog.Models.Remove(currentDefinition);
+            }
+            _modelCatalog.Models.Add(restoredDefinition);
+            SaveModelCatalog(_modelCatalog);
+            ConfigureProfiles();
+            _selectedPluginId = restoredDefinition.Id;
+            Controls.Clear();
+            InitializeUi();
+            RefreshStatus();
+            AppendLog(L($"已恢复插件版本：{restoredDefinition.DisplayName} {restoredDefinition.InstalledVersion}", $"Plugin version restored: {restoredDefinition.DisplayName} {restoredDefinition.InstalledVersion}"));
+        }
+        catch (Exception ex)
+        {
+            if (!Directory.Exists(targetRoot) && currentBackup is not null && Directory.Exists(currentBackup))
+            {
+                Directory.Move(currentBackup, targetRoot);
+            }
+            MessageBox.Show(ex.Message, L("恢复失败", "Restore failed"), MessageBoxButtons.OK, MessageBoxIcon.Error);
+        }
+    }
+
+    private async Task ShowInstallPluginWizardAsync()
+    {
+        using var manifestPicker = new OpenFileDialog
+        {
+            Title = L("选择插件清单", "Choose plugin manifest"),
+            Filter = "BaChen plugin manifest (*.json)|*.json|All files (*.*)|*.*",
+            CheckFileExists = true
+        };
+        if (manifestPicker.ShowDialog(this) != DialogResult.OK)
+        {
+            return;
+        }
+
+        PluginPackageManifest manifest;
+        try
+        {
+            manifest = JsonSerializer.Deserialize<PluginPackageManifest>(
+                await File.ReadAllTextAsync(manifestPicker.FileName),
+                new JsonSerializerOptions { PropertyNameCaseInsensitive = true })
+                ?? throw new InvalidDataException("The plugin manifest is empty.");
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show(ex.Message, L("清单读取失败", "Manifest read failed"), MessageBoxButtons.OK, MessageBoxIcon.Error);
+            return;
+        }
+
+        var verification = PluginManifestSignatureVerifier.Verify(manifest, _trustedPublishers);
+        if (!verification.IsTrusted)
+        {
+            MessageBox.Show(
+                L("此插件不会被安装，因为清单未通过签名验证。\n\n", "This plugin will not be installed because its manifest is not trusted.\n\n") + verification.Message,
+                L("签名验证失败", "Signature verification failed"), MessageBoxButtons.OK, MessageBoxIcon.Error);
+            return;
+        }
+
+        var existing = _modelCatalog.Models.FirstOrDefault(model => model.Id.Equals(manifest.Id, StringComparison.OrdinalIgnoreCase));
+        var usedPorts = _modelCatalog.Models.Where(model => existing is null || !model.Id.Equals(existing.Id, StringComparison.OrdinalIgnoreCase)).Select(model => model.Port);
+        if (usedPorts.Contains(manifest.Port))
+        {
+            MessageBox.Show(L($"端口 {manifest.Port} 已分配给其他插件。", $"Port {manifest.Port} is assigned to another plugin."), L("端口冲突", "Port conflict"), MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            return;
+        }
+
+        string? packagePath = null;
+        using (var packagePicker = new OpenFileDialog
+        {
+            Title = L("选择插件 ZIP 包；取消可使用清单中的 HTTPS 地址", "Choose plugin ZIP; cancel to use the manifest HTTPS URL"),
+            Filter = "Plugin package (*.zip)|*.zip",
+            InitialDirectory = Path.GetDirectoryName(manifestPicker.FileName),
+            CheckFileExists = true
+        })
+        {
+            if (packagePicker.ShowDialog(this) == DialogResult.OK)
+            {
+                packagePath = packagePicker.FileName;
+            }
+            else if (!Uri.TryCreate(manifest.PackageUrl, UriKind.Absolute, out var packageUri) || packageUri.Scheme != Uri.UriSchemeHttps)
+            {
+                return;
+            }
+        }
+
+        var summary = L(
+            $"插件：{manifest.DisplayName}\n版本：{manifest.Version}\n发布者：{verification.Publisher?.DisplayName}\n分类：{manifest.Category}\n端口：{manifest.Port}\n包来源：{(packagePath ?? manifest.PackageUrl)}\n\n签名有效。是否安装？",
+            $"Plugin: {manifest.DisplayName}\nVersion: {manifest.Version}\nPublisher: {verification.Publisher?.DisplayName}\nCategory: {manifest.Category}\nPort: {manifest.Port}\nPackage: {packagePath ?? manifest.PackageUrl}\n\nSignature is valid. Install now?");
+        if (MessageBox.Show(summary, L("安装插件", "Install plugin"), MessageBoxButtons.YesNo, MessageBoxIcon.Information) != DialogResult.Yes)
+        {
+            return;
+        }
+
+        try
+        {
+            SetRuntimePhase("正在验证并安装插件", $"Installing {manifest.DisplayName}");
+            var result = await _pluginPackageService.InstallAsync(manifest, packagePath, _settings.DataRoot);
+            if (existing is not null && result.ReplacedPluginBackup is not null)
+            {
+                File.WriteAllText(
+                    Path.Combine(result.ReplacedPluginBackup, ".bachen-plugin-definition.json"),
+                    JsonSerializer.Serialize(existing, new JsonSerializerOptions { WriteIndented = true }),
+                    Encoding.UTF8);
+            }
+            if (existing is not null)
+            {
+                _modelCatalog.Models.Remove(existing);
+            }
+            _modelCatalog.Models.Add(result.Definition);
+            SaveModelCatalog(_modelCatalog);
+            ConfigureProfiles();
+            _selectedPluginId = result.Definition.Id;
+            _pluginSearchQuery = string.Empty;
+            _pluginCategory = "*";
+            Controls.Clear();
+            InitializeUi();
+            RefreshStatus();
+            AppendLog(L($"已安装插件：{result.Definition.DisplayName} {result.Definition.InstalledVersion}", $"Plugin installed: {result.Definition.DisplayName} {result.Definition.InstalledVersion}"));
+            var backupMessage = result.ReplacedPluginBackup is null ? string.Empty : Environment.NewLine + L($"旧版本备份：{result.ReplacedPluginBackup}", $"Previous version backup: {result.ReplacedPluginBackup}");
+            MessageBox.Show(L("插件安装完成。", "Plugin installation complete.") + backupMessage, L("安装完成", "Installation complete"), MessageBoxButtons.OK, MessageBoxIcon.Information);
+        }
+        catch (Exception ex)
+        {
+            AppendLog(L("插件安装失败：", "Plugin installation failed: ") + ex.Message, null, true);
+            MessageBox.Show(ex.Message, L("安装失败", "Installation failed"), MessageBoxButtons.OK, MessageBoxIcon.Error);
+        }
+    }
+
+    private void UninstallSelectedPlugin()
+    {
+        var definition = _modelCatalog.Models.FirstOrDefault(model => model.Id.Equals(_selectedPluginId, StringComparison.OrdinalIgnoreCase));
+        if (definition is null || definition.IsBuiltIn)
+        {
+            MessageBox.Show(L("内置插件不能通过此功能卸载。", "Built-in plugins cannot be removed with this command."), L("无法卸载", "Cannot uninstall"), MessageBoxButtons.OK, MessageBoxIcon.Information);
+            return;
+        }
+        if (MessageBox.Show(
+                L($"卸载 {definition.DisplayName}？托管目录会移动到备份，而不是永久删除。", $"Uninstall {definition.DisplayName}? Managed files will be moved to backup, not permanently deleted."),
+                L("确认卸载", "Confirm uninstall"), MessageBoxButtons.YesNo, MessageBoxIcon.Warning) != DialogResult.Yes)
+        {
+            return;
+        }
+        try
+        {
+            if (_activeService is not null && _activeService.WorkingDirectory.Equals(definition.RootDirectory, StringComparison.OrdinalIgnoreCase))
+            {
+                StopKnownServices();
+            }
+            var result = _pluginPackageService.Uninstall(definition, _settings.DataRoot);
+            if (result.BackupPath is not null)
+            {
+                File.WriteAllText(Path.Combine(result.BackupPath, ".bachen-plugin-definition.json"), JsonSerializer.Serialize(definition, new JsonSerializerOptions { WriteIndented = true }), Encoding.UTF8);
+            }
+            _modelCatalog.Models.Remove(definition);
+            SaveModelCatalog(_modelCatalog);
+            ConfigureProfiles();
+            _selectedPluginId = "woosh-dflow";
+            Controls.Clear();
+            InitializeUi();
+            RefreshStatus();
+            var details = result.FilesMoved
+                ? L($"插件文件已移动到：{result.BackupPath}", $"Plugin files moved to: {result.BackupPath}")
+                : L("插件目录位于托管目录外，仅移除了启动器登记，未移动文件。", "The plugin directory is outside managed storage; only its launcher registration was removed.");
+            AppendLog(L($"已卸载插件：{definition.DisplayName}", $"Plugin uninstalled: {definition.DisplayName}"));
+            MessageBox.Show(details, L("卸载完成", "Uninstall complete"), MessageBoxButtons.OK, MessageBoxIcon.Information);
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show(ex.Message, L("卸载失败", "Uninstall failed"), MessageBoxButtons.OK, MessageBoxIcon.Error);
+        }
+    }
+
+    private void ShowTrustedPublishersDialog()
+    {
+        using var dialog = new Form
+        {
+            Text = L("受信任发布者", "Trusted publishers"),
+            StartPosition = FormStartPosition.CenterParent,
+            FormBorderStyle = FormBorderStyle.FixedDialog,
+            ClientSize = new Size(760, 430),
+            MaximizeBox = false,
+            MinimizeBox = false,
+            ShowInTaskbar = false,
+            Font = new Font("Microsoft YaHei UI", 10F)
+        };
+        var list = new ListBox { Location = new Point(24, 24), Size = new Size(712, 300) };
+        void RefreshPublisherList()
+        {
+            list.Items.Clear();
+            foreach (var publisher in _trustedPublishers.Publishers.OrderBy(item => item.DisplayName))
+            {
+                list.Items.Add($"{publisher.DisplayName}  |  {publisher.KeyId}  |  {publisher.AddedAt:yyyy-MM-dd}");
+            }
+        }
+        RefreshPublisherList();
+        var add = new Button { Text = L("导入公钥", "Import public key"), Location = new Point(374, 354), Size = new Size(140, 38) };
+        var remove = new Button { Text = L("移除信任", "Remove trust"), Location = new Point(526, 354), Size = new Size(110, 38) };
+        var close = new Button { Text = L("关闭", "Close"), DialogResult = DialogResult.OK, Location = new Point(648, 354), Size = new Size(88, 38) };
+        add.Click += (_, _) =>
+        {
+            using var keyPicker = new OpenFileDialog { Filter = "PEM public key (*.pem;*.pub)|*.pem;*.pub|All files (*.*)|*.*", CheckFileExists = true };
+            if (keyPicker.ShowDialog(dialog) != DialogResult.OK)
+            {
+                return;
+            }
+            var pem = File.ReadAllText(keyPicker.FileName);
+            try
+            {
+                using var rsa = System.Security.Cryptography.RSA.Create();
+                rsa.ImportFromPem(pem);
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show(ex.Message, L("公钥无效", "Invalid public key"), MessageBoxButtons.OK, MessageBoxIcon.Error);
+                return;
+            }
+            using var metadata = new Form { Text = L("发布者信息", "Publisher information"), StartPosition = FormStartPosition.CenterParent, FormBorderStyle = FormBorderStyle.FixedDialog, ClientSize = new Size(520, 190), MaximizeBox = false, MinimizeBox = false };
+            var name = new TextBox { Location = new Point(160, 30), Size = new Size(330, 30) };
+            var keyId = new TextBox { Location = new Point(160, 76), Size = new Size(330, 30), Text = Path.GetFileNameWithoutExtension(keyPicker.FileName) };
+            metadata.Controls.Add(new Label { Text = L("发布者名称", "Publisher name"), Location = new Point(24, 34), Size = new Size(125, 26) });
+            metadata.Controls.Add(new Label { Text = "Key ID", Location = new Point(24, 80), Size = new Size(125, 26) });
+            metadata.Controls.Add(name);
+            metadata.Controls.Add(keyId);
+            metadata.Controls.Add(new Button { Text = L("取消", "Cancel"), DialogResult = DialogResult.Cancel, Location = new Point(276, 130), Size = new Size(100, 34) });
+            metadata.Controls.Add(new Button { Text = L("导入", "Import"), DialogResult = DialogResult.OK, Location = new Point(390, 130), Size = new Size(100, 34) });
+            if (metadata.ShowDialog(dialog) != DialogResult.OK || string.IsNullOrWhiteSpace(name.Text) || string.IsNullOrWhiteSpace(keyId.Text))
+            {
+                return;
+            }
+            _trustedPublishers.Publishers.RemoveAll(item => item.KeyId.Equals(keyId.Text.Trim(), StringComparison.OrdinalIgnoreCase));
+            _trustedPublishers.Publishers.Add(new TrustedPublisher { KeyId = keyId.Text.Trim(), DisplayName = name.Text.Trim(), PublicKeyPem = pem, AddedAt = DateTimeOffset.Now });
+            TrustedPublisherStoreService.Save(TrustedPublishersPath, _trustedPublishers);
+            RefreshPublisherList();
+        };
+        remove.Click += (_, _) =>
+        {
+            if (list.SelectedIndex < 0)
+            {
+                return;
+            }
+            var publisher = _trustedPublishers.Publishers.OrderBy(item => item.DisplayName).ElementAt(list.SelectedIndex);
+            _trustedPublishers.Publishers.Remove(publisher);
+            TrustedPublisherStoreService.Save(TrustedPublishersPath, _trustedPublishers);
+            RefreshPublisherList();
+        };
+        dialog.Controls.Add(list);
+        dialog.Controls.Add(add);
+        dialog.Controls.Add(remove);
+        dialog.Controls.Add(close);
+        dialog.AcceptButton = close;
+        dialog.ShowDialog(this);
     }
 
     private void ShowAddModelDialog()
@@ -2236,7 +2634,7 @@ internal sealed class LauncherForm : Form
             Size = new Size(872, 570),
             Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right | AnchorStyles.Bottom,
             ColumnCount = 3,
-            RowCount = 11,
+            RowCount = 14,
             AutoScroll = true,
             BackColor = Theme.Card
         };
@@ -2290,6 +2688,11 @@ internal sealed class LauncherForm : Form
         var required = AddTextRow(table, 8, L("必需文件", "Required files"), string.Empty);
         var repository = AddTextRow(table, 9, L("GitHub 仓库", "GitHub repository"), string.Empty);
         var branch = AddTextRow(table, 10, L("更新分支", "Update branch"), "main");
+        var version = AddTextRow(table, 11, L("本地版本", "Local version"), "local");
+        var dependencies = AddTextRow(table, 12, L("依赖声明", "Dependencies"), string.Empty);
+        var systemMemory = new NumericUpDown { Minimum = 0, Maximum = 256, DecimalPlaces = 1, Increment = 1, Value = 8, Width = 180, Margin = new Padding(6) };
+        table.Controls.Add(new Label { Text = L("建议内存 (GB)", "Recommended RAM (GB)"), Dock = DockStyle.Fill, TextAlign = ContentAlignment.MiddleLeft }, 0, 13);
+        table.Controls.Add(systemMemory, 1, 13);
         dialog.Controls.Add(table);
 
         var hint = new Label
@@ -2337,10 +2740,15 @@ internal sealed class LauncherForm : Form
                 Arguments = arguments.Text.Trim(),
                 Port = (int)port.Value,
                 RecommendedVramMiB = (int)(vram.Value * 1024M),
+                RecommendedSystemMemoryMiB = (int)(systemMemory.Value * 1024M),
                 IsHighVram = highVram.Checked,
                 RequiredFiles = required.Text.Split(';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).Select(item => item.Replace('\\', '/')).ToArray(),
+                Dependencies = dependencies.Text.Split(';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries),
                 GitHubRepository = repository.Text.Trim(),
-                GitHubBranch = string.IsNullOrWhiteSpace(branch.Text) ? "main" : branch.Text.Trim()
+                GitHubBranch = string.IsNullOrWhiteSpace(branch.Text) ? "main" : branch.Text.Trim(),
+                InstalledVersion = string.IsNullOrWhiteSpace(version.Text) ? "local" : version.Text.Trim(),
+                Publisher = L("本机用户", "Local user"),
+                TrustSource = "LocalUser"
             };
             _modelCatalog.Models.Add(definition);
             SaveModelCatalog(_modelCatalog);
@@ -2657,14 +3065,20 @@ internal sealed class LauncherForm : Form
         _detailRootLabel = CreateParagraph(string.Empty, new Rectangle(30, 198, 500, 38), 8F, Theme.Ink, FontStyle.Regular);
         _detailPortLabel = CreateText(string.Empty, new Rectangle(30, 240, 240, 27), 9F, Theme.Ink, FontStyle.Bold);
         _detailMemoryLabel = CreateText(string.Empty, new Rectangle(280, 240, 250, 27), 9F, Theme.Ink, FontStyle.Bold);
+        _detailVersionLabel = CreateText(string.Empty, new Rectangle(30, 272, 500, 25), 8.5F, Theme.Ink, FontStyle.Bold);
+        _detailDependencyLabel = CreateParagraph(string.Empty, new Rectangle(30, 301, 500, 44), 8F, Theme.Muted, FontStyle.Regular);
+        _detailTrustLabel = CreateText(string.Empty, new Rectangle(30, 348, 500, 25), 8.5F, Theme.MidTeal, FontStyle.Bold);
         detailPanel.Controls.Add(_detailRootLabel);
         detailPanel.Controls.Add(_detailPortLabel);
         detailPanel.Controls.Add(_detailMemoryLabel);
-        detailPanel.Controls.Add(CreateText(L("启动配置", "LAUNCH PROFILE"), new Rectangle(30, 286, 180, 22), 8F, Color.FromArgb(89, 130, 124), FontStyle.Bold));
+        detailPanel.Controls.Add(_detailVersionLabel);
+        detailPanel.Controls.Add(_detailDependencyLabel);
+        detailPanel.Controls.Add(_detailTrustLabel);
+        detailPanel.Controls.Add(CreateText(L("启动配置", "LAUNCH PROFILE"), new Rectangle(30, 382, 180, 22), 8F, Color.FromArgb(89, 130, 124), FontStyle.Bold));
 
         _stableModePanel = new FlowLayoutPanel
         {
-            Location = new Point(30, 316),
+            Location = new Point(30, 410),
             Size = new Size(500, 40),
             BackColor = Color.White,
             WrapContents = false
@@ -2675,17 +3089,17 @@ internal sealed class LauncherForm : Form
         detailPanel.Controls.Add(_stableModePanel);
 
         _detailPrimaryButton = CreateActionButton(L("启动插件", "Launch plugin"), Theme.DeepTeal, 210);
-        _detailPrimaryButton.Location = new Point(30, 376);
+        _detailPrimaryButton.Location = new Point(30, 466);
         _detailPrimaryButton.Height = 42;
         _detailPrimaryButton.Click += (_, _) => HandlePrimaryPluginAction();
         _openButton = _detailPrimaryButton;
         var stopButton = CreateActionButton(L("停止当前 AI", "Stop active AI"), Theme.Coral, 170);
-        stopButton.Location = new Point(252, 376);
+        stopButton.Location = new Point(252, 466);
         stopButton.Height = 42;
         stopButton.Click += (_, _) => StopKnownServices();
         detailPanel.Controls.Add(_detailPrimaryButton);
         detailPanel.Controls.Add(stopButton);
-        detailPanel.Controls.Add(CreateParagraph(L("模型启动后，主按钮会自动切换为打开 WebUI。", "The primary action changes to Open WebUI when the service is ready."), new Rectangle(30, 430, 500, 45), 8.5F, Theme.Muted, FontStyle.Regular));
+        detailPanel.Controls.Add(CreateParagraph(L("模型启动后，主按钮会自动切换为打开 WebUI。", "The primary action changes to Open WebUI when the service is ready."), new Rectangle(30, 520, 500, 45), 8.5F, Theme.Muted, FontStyle.Regular));
         detailPanel.SizeChanged += (_, _) =>
         {
             var width = Math.Max(280, detailPanel.ClientSize.Width - 60);
@@ -2693,6 +3107,9 @@ internal sealed class LauncherForm : Form
             _detailDescriptionLabel.Width = width;
             _detailStatusLabel.Width = width;
             _detailRootLabel.Width = width;
+            _detailVersionLabel.Width = width;
+            _detailDependencyLabel.Width = width;
+            _detailTrustLabel.Width = width;
             _stableModePanel.Width = width;
         };
         mainShell.Controls.Add(detailPanel, 2, 0);
@@ -2916,6 +3333,27 @@ internal sealed class LauncherForm : Form
         if (_detailRootLabel is not null) _detailRootLabel.Text = L("目录：", "Directory: ") + selected.Profile.WorkingDirectory;
         if (_detailPortLabel is not null) _detailPortLabel.Text = $"PORT  {selected.Profile.Port}";
         if (_detailMemoryLabel is not null) _detailMemoryLabel.Text = selected.RecommendedVramMiB > 0 ? $"VRAM  {selected.RecommendedVramMiB / 1024D:0.#} GB" : "VRAM  --";
+        var definition = _modelCatalog.Models.FirstOrDefault(model => model.Id.Equals(selected.Id, StringComparison.OrdinalIgnoreCase));
+        if (_detailVersionLabel is not null)
+        {
+            _detailVersionLabel.Text = definition is null
+                ? "VERSION  --"
+                : $"VERSION  {definition.InstalledVersion}    {L("发布者", "PUBLISHER")}  {(string.IsNullOrWhiteSpace(definition.Publisher) ? "--" : definition.Publisher)}";
+        }
+        if (_detailDependencyLabel is not null)
+        {
+            _detailDependencyLabel.Text = definition is null || definition.Dependencies.Length == 0
+                ? L("依赖：未声明", "Dependencies: none declared")
+                : L("依赖：", "Dependencies: ") + string.Join(", ", definition.Dependencies);
+        }
+        if (_detailTrustLabel is not null)
+        {
+            var trust = definition is null ? null : InstalledPluginTrustValidator.Verify(definition, _trustedPublishers);
+            _detailTrustLabel.Text = trust?.IsTrusted == true
+                ? L($"信任状态：已验证 · {definition!.TrustSource}", $"TRUST  VERIFIED · {definition!.TrustSource}")
+                : L("信任状态：验证失败，启动将被阻止", "TRUST  FAILED · launch blocked");
+            _detailTrustLabel.ForeColor = trust?.IsTrusted == true ? Theme.MidTeal : Theme.Coral;
+        }
         if (_stableModePanel is not null) _stableModePanel.Visible = selected.HasModelSelector;
         if (_detailPrimaryButton is not null)
         {
@@ -3426,6 +3864,20 @@ internal sealed class LauncherForm : Form
     {
         SetServiceRuntimeState(profile, ServiceRuntimeState.Checking);
         SetRuntimePhase("正在检查启动环境", $"Checking {profile.Name}");
+        var definition = _modelCatalog.Models.FirstOrDefault(model =>
+            Path.GetFullPath(model.RootDirectory).Equals(Path.GetFullPath(profile.WorkingDirectory), StringComparison.OrdinalIgnoreCase));
+        if (definition is not null)
+        {
+            var trust = InstalledPluginTrustValidator.Verify(definition, _trustedPublishers);
+            if (!trust.IsTrusted)
+            {
+                SetServiceRuntimeState(profile, ServiceRuntimeState.Error);
+                SetRuntimePhase("插件信任验证失败", $"Trust validation failed for {profile.Name}");
+                AppendLog(L("插件信任验证失败：", "Plugin trust validation failed: ") + trust.Message, profile, true);
+                ShowActionableError(L("已阻止不可信启动命令", "Untrusted launch command blocked"), trust.Message, profile);
+                return;
+            }
+        }
         var missing = GetMissingRequirements(profile);
         if (missing.Count > 0)
         {
