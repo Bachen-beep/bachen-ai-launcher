@@ -189,6 +189,7 @@ jobs:
       - name: Publish GitHub release
         uses: softprops/action-gh-release@v3
         with:
+          draft: true
           prerelease: ${{ steps.version.outputs.prerelease }}
           generate_release_notes: true
           body_path: ${{ steps.version.outputs.release_notes }}
@@ -198,6 +199,24 @@ jobs:
             artifacts/launcher-update.json
             artifacts/SHA256SUMS.txt
             artifacts/BaChen-AI-Launcher.spdx.json
+
+      - name: Publish completed draft release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $arguments = @(
+            "release", "edit", "${{ github.ref_name }}",
+            "--repo", "${{ github.repository }}",
+            "--draft=false"
+          )
+          if ("${{ steps.version.outputs.prerelease }}" -eq "true") {
+            $arguments += "--prerelease"
+          }
+          else {
+            $arguments += "--latest"
+          }
+          gh @arguments
 
       - name: Verify published assets and attestations
         shell: pwsh
