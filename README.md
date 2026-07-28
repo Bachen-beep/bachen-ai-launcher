@@ -2,11 +2,7 @@
 
 用于统一管理本地 AI 插件的 Windows 启动器。插件可以是音频、图像、视频、LLM、视觉、编程、3D 或其他本地 AI 服务。
 
-当前内置插件：
-
-- Woosh-DFlow
-- Stable Audio 3：small-sfx、small-music、medium
-- IndexTTS2
+启动器安装包不包含也不预置任何 AI 插件。新电脑首次启动时插件库为空；用户通过“工具 > 从 GitHub 添加模型”输入仓库、分支、启动命令和资源要求，启动器再把固定 commit 下载到本地托管目录。
 
 ## 当前能力
 
@@ -20,7 +16,8 @@
 - 持久轮转日志、全局崩溃日志和一键脱敏诊断导出
 - 轻量 Inno Setup 安装包，升级和卸载默认保留用户配置与插件数据
 - 内置插件、自定义本地配置和签名第三方插件采用不同信任来源
-- 新用户首次运行向导，可选择存储位置、检查硬件、接受许可证并自动部署插件
+- 空插件库首次启动，不会伪造或预置本地模型
+- GitHub 模型导入会固定 commit、下载源码并可选自动配置托管 Python 环境
 - 固定版本的托管 Python 运行时，无需用户预装 Python 或使用终端
 - RSA 签名插件索引，远程不可用时自动使用 EXE 内嵌可信目录
 
@@ -60,7 +57,7 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File ".\scripts\Publish.ps1"
 安装 Inno Setup 6 后运行：
 
 ```powershell
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File ".\scripts\Build-Installer.ps1" -Version "0.16.0"
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File ".\scripts\Build-Installer.ps1" -Version "0.16.1"
 ```
 
 安装包位于 `artifacts\installer`。安装包只包含启动器、许可证和第三方声明，不包含插件、Python 环境或模型权重。阶段二发布边界与验收标准参见 `Docs/StageTwoReleasePlan.md`，签名配置参见 `Docs/ReleaseSigning.md`。
@@ -71,7 +68,7 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File ".\scripts\Build-Install
 
 ```powershell
 gh attestation verify ".\BaChen.AI.Launcher.exe" --repo Bachen-beep/bachen-ai-launcher
-gh attestation verify ".\BaChen-AI-Launcher-Setup-0.16.0.exe" --repo Bachen-beep/bachen-ai-launcher
+gh attestation verify ".\BaChen-AI-Launcher-Setup-0.16.1.exe" --repo Bachen-beep/bachen-ai-launcher
 ```
 
 Attestation 用于证明文件来自指定仓库、提交和 GitHub Actions 工作流，不能代替 Authenticode，也不会消除 Windows SmartScreen 提示。

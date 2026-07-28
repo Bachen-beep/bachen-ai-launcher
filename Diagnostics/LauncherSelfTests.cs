@@ -282,19 +282,27 @@ internal static class LauncherSelfTests
             var legacyInstall = await packageService.InstallAsync(legacyManifest, packagePath, Path.Combine(testRoot, "legacy-v3"));
             Assert(File.Exists(Path.Combine(legacyInstall.Definition.RootDirectory, "start.cmd")), "Legacy manifest v3 compatibility", lines);
 
-            var builtInCatalog = BuiltInPluginCatalog.CreateCatalog(new LauncherSettings
+            Assert(new LauncherModelCatalog().Models.Count == 0, "Clean model catalog contains no built-in plugins", lines);
+            var parsedGpus = SystemResourceProbe.ParseGpuOutput("0, NVIDIA GeForce RTX 4060, 512, 8188\r\n1, NVIDIA GeForce RTX 4090, 1024, 24564\r\n");
+            Assert(parsedGpus.Count == 2 && parsedGpus.OrderByDescending(gpu => gpu.TotalMiB).First().Name == "NVIDIA GeForce RTX 4090", "Actual multi-GPU model parsing and primary selection", lines);
+
+            var gitHubSourceRoot = Path.Combine(testRoot, "github-source");
+            Directory.CreateDirectory(gitHubSourceRoot);
+            await File.WriteAllTextAsync(Path.Combine(gitHubSourceRoot, "app.py"), "print('ready')", Encoding.UTF8);
+            var gitHubArchive = Path.Combine(testRoot, "github-source.zip");
+            ZipFile.CreateFromDirectory(gitHubSourceRoot, gitHubArchive, CompressionLevel.Fastest, true);
+            var gitHubArchiveBytes = await File.ReadAllBytesAsync(gitHubArchive);
+            const string importedCommit = "0123456789abcdef0123456789abcdef01234567";
+            using (var importClient = new HttpClient(new GitHubImportHandler(importedCommit, gitHubArchiveBytes)))
             {
-                WooshRoot = Path.Combine(testRoot, "Woosh"),
-                StableRoot = Path.Combine(testRoot, "Stable Audio 3"),
-                IndexTtsRoot = Path.Combine(testRoot, "IndexTTS"),
-                WooshPort = 17860,
-                StablePort = 17861,
-                IndexTtsPort = 17862
-            });
-            Assert(builtInCatalog.Models.Count == 3 && builtInCatalog.Models.All(model => model.IsBuiltIn), "Three built-in manifest definitions", lines);
-            Assert(builtInCatalog.Models.Select(model => model.Port).Distinct().Count() == 3, "Built-in fixed port uniqueness", lines);
-            Assert(builtInCatalog.Models.All(model => model.Runtime == "python" && model.RuntimeVersion == ">=3.10"), "Built-in structured Python requirements", lines);
-            Assert(builtInCatalog.Models.All(model => model.PreservedPaths.Contains("checkpoints")), "Built-in preserved model directories", lines);
+                importClient.DefaultRequestHeaders.UserAgent.ParseAdd("BaChen-Self-Test");
+                var importRoot = Path.Combine(testRoot, "github-import-data");
+                var imported = await new GitHubModelImportService(importClient).ImportAsync("example/model-repo", "main", importRoot);
+                Assert(imported.CommitSha == importedCommit && File.Exists(Path.Combine(imported.RootDirectory, "app.py")), "GitHub model import pinned to immutable commit", lines);
+                Assert(File.Exists(Path.Combine(imported.RootDirectory, ".bachen-github-source.json")), "GitHub import provenance metadata", lines);
+                var reused = await new GitHubModelImportService(importClient).ImportAsync("example/model-repo", "main", importRoot);
+                Assert(reused.RootDirectory == imported.RootDirectory, "Verified GitHub source reuse after setup retry", lines);
+            }
 
             var downloadRoot = Path.Combine(testRoot, "download-resume");
             var downloadDirectory = Path.Combine(downloadRoot, "downloads");
@@ -571,6 +579,26 @@ internal static class LauncherSelfTests
             {
                 Content = new ByteArrayContent(bytes)
             });
+    }
+
+    private sealed class GitHubImportHandler(string commitSha, byte[] archiveBytes) : HttpMessageHandler
+    {
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            if (request.RequestUri?.AbsolutePath.Contains("/commits/", StringComparison.OrdinalIgnoreCase) == true)
+            {
+                return Task.FromResult(new HttpResponseMessage(System.Net.HttpStatusCode.OK)
+                {
+                    RequestMessage = request,
+                    Content = new StringContent($"{{\"sha\":\"{commitSha}\"}}", Encoding.UTF8, "application/json")
+                });
+            }
+            return Task.FromResult(new HttpResponseMessage(System.Net.HttpStatusCode.OK)
+            {
+                RequestMessage = request,
+                Content = new ByteArrayContent(archiveBytes)
+            });
+        }
     }
 
     private sealed class StatusCodeHandler(System.Net.HttpStatusCode statusCode) : HttpMessageHandler

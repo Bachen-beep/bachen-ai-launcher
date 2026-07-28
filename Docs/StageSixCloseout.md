@@ -20,3 +20,7 @@ The Release build and automated launcher self-test pass. Tests cover signed-inde
 - Run the installer and first-run wizard under a clean standard Windows user profile.
 - Perform one full Woosh installation with approximately 3.4 GB of model downloads and confirm the upstream Python dependency set on the target GPU.
 - Add a separately backed-up plugin-index signing secret to GitHub only if future workflows need to generate a new index in CI. The current workflow publishes the already signed repository index and never requires the private key.
+
+## 0.16.1 correction
+
+Clean installations no longer create placeholder built-in plugins or automatically open the catalog installer. The supported clean-machine path is now an empty library followed by an explicit GitHub model import. Existing legacy entries remain only when their deployment directory exists.

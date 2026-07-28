@@ -794,6 +794,7 @@ internal sealed class LauncherForm : Form
     private readonly PluginPackageService _pluginPackageService = new(GitHubClient);
     private readonly PluginDownloadService _pluginDownloadService = new(GitHubClient);
     private readonly PluginCatalogService _pluginCatalogService = new(GitHubClient);
+    private readonly GitHubModelImportService _gitHubModelImportService = new(GitHubClient);
     private readonly ExternalModelAuthorizationService _authorizationService = new(GitHubClient);
     private readonly GitHubUpdateService _sourceUpdateService = new(GitHubClient);
     private readonly LauncherSelfUpdateService _launcherUpdateService = new(GitHubClient);
@@ -815,6 +816,7 @@ internal sealed class LauncherForm : Form
     private RoundedButton? _detailPrimaryButton;
     private RoundedButton? _logToggleButton;
     private SafeTextLabel? _gpuSummaryLabel;
+    private SafeTextLabel? _gpuNameLabel;
     private SafeTextLabel? _detailTitleLabel;
     private ParagraphLabel? _detailDescriptionLabel;
     private SafeTextLabel? _detailStatusLabel;
@@ -845,12 +847,12 @@ internal sealed class LauncherForm : Form
     private string _pluginSearchQuery = string.Empty;
     private string _pluginCategory = "*";
 
-    private ServiceProfile _woosh = null!;
-    private ServiceProfile _smallSfx = null!;
-    private ServiceProfile _smallMusic = null!;
-    private ServiceProfile _medium = null!;
-    private ServiceProfile _indexTts = null!;
-    private ServiceProfile _selectedStableProfile = null!;
+    private ServiceProfile? _woosh;
+    private ServiceProfile? _smallSfx;
+    private ServiceProfile? _smallMusic;
+    private ServiceProfile? _medium;
+    private ServiceProfile? _indexTts;
+    private ServiceProfile? _selectedStableProfile;
     private string _backgroundUpdateStatusChinese = string.Empty;
     private string _backgroundUpdateStatusEnglish = string.Empty;
     private ContextMenuStrip? _maintenanceMenu;
@@ -867,11 +869,11 @@ internal sealed class LauncherForm : Form
         _modelCatalog = LoadModelCatalog();
         _trustedPublishers = TrustedPublisherStoreService.Load(TrustedPublishersPath);
         MigrateRenamedCatalogPaths(_modelCatalog);
-        SyncBuiltInCatalogEntries();
+        MigrateLegacyBuiltInCatalogEntries();
         SaveModelCatalog(_modelCatalog);
         ArchiveMigratedLegacyConfiguration(_settings);
         ConfigureProfiles();
-        _selectedStableProfile = _smallSfx;
+        _selectedStableProfile ??= _smallSfx;
         InitializeUi();
         RefreshStatus();
         _gpuRefreshTimer.Tick += (_, _) => UpdateGpuIndicator();
@@ -908,19 +910,24 @@ internal sealed class LauncherForm : Form
                 ["pyproject.toml", "requirements.txt", "uv.lock"]));
         }
         _updateSources = updateSources.ToArray();
-        _woosh = CreateBuiltInProfile("woosh-dflow");
-        _smallSfx = CreateBuiltInProfile("stable-audio-3", "run_gradio.py --model small-sfx --port {port}");
-        _smallMusic = CreateBuiltInProfile("stable-audio-3", "run_gradio.py --model small-music --port {port}");
-        _medium = CreateBuiltInProfile("stable-audio-3", "run_gradio.py --model medium --port {port}", true, 8800, 16384);
-        _indexTts = CreateBuiltInProfile("indextts2");
+        _woosh = CreateSpecialProfile("woosh-dflow");
+        _smallSfx = CreateSpecialProfile("stable-audio-3", "run_gradio.py --model small-sfx --port {port}");
+        _smallMusic = CreateSpecialProfile("stable-audio-3", "run_gradio.py --model small-music --port {port}");
+        _medium = CreateSpecialProfile("stable-audio-3", "run_gradio.py --model medium --port {port}", true, 8800, 16384);
+        _indexTts = CreateSpecialProfile("indextts2");
+        if (_selectedStableProfile is null || _smallSfx is null || !_selectedStableProfile.WorkingDirectory.Equals(_smallSfx.WorkingDirectory, StringComparison.OrdinalIgnoreCase))
+        {
+            _selectedStableProfile = _smallSfx;
+        }
     }
 
-    private LauncherModelDefinition BuiltInDefinition(string id)
-        => _modelCatalog.Models.Single(definition => definition.IsBuiltIn && definition.Id.Equals(id, StringComparison.OrdinalIgnoreCase));
-
-    private ServiceProfile CreateBuiltInProfile(string id, string? arguments = null, bool? isHighVram = null, int? recommendedVramMiB = null, int? recommendedSystemMemoryMiB = null)
+    private ServiceProfile? CreateSpecialProfile(string id, string? arguments = null, bool? isHighVram = null, int? recommendedVramMiB = null, int? recommendedSystemMemoryMiB = null)
     {
-        var definition = BuiltInDefinition(id);
+        var definition = _modelCatalog.Models.FirstOrDefault(item => item.Id.Equals(id, StringComparison.OrdinalIgnoreCase));
+        if (definition is null)
+        {
+            return null;
+        }
         var executable = ExpandModelValue(definition.Executable, definition.RootDirectory, definition.Port);
         if (!Path.IsPathRooted(executable) && (executable.Contains('/') || executable.Contains('\\')))
         {
@@ -941,7 +948,7 @@ internal sealed class LauncherForm : Form
     }
 
     private IEnumerable<LauncherModelDefinition> CustomModelDefinitions()
-        => _modelCatalog.Models.Where(definition => !definition.IsBuiltIn);
+        => _modelCatalog.Models;
 
     private static ServiceProfile CreateCustomProfile(LauncherModelDefinition definition)
     {
@@ -1061,7 +1068,7 @@ internal sealed class LauncherForm : Form
     private static LauncherSettings CreateFirstRunSettings()
     {
         var settings = CreateSettingsForDataRoot(LauncherPaths.DefaultDataDirectory);
-        settings.FirstRunCompleted = false;
+        settings.FirstRunCompleted = true;
         return settings;
     }
 
@@ -1233,7 +1240,7 @@ internal sealed class LauncherForm : Form
     }
 
     private LauncherModelCatalog CreateDefaultModelCatalog()
-        => BuiltInPluginCatalog.CreateCatalog(_settings);
+        => new();
 
     private static void SaveModelCatalog(LauncherModelCatalog catalog)
     {
@@ -1241,42 +1248,18 @@ internal sealed class LauncherForm : Form
         LauncherConfigurationStore.SaveAtomic(ModelCatalogPath, catalog);
     }
 
-    private void SyncBuiltInCatalogEntries()
+    private void MigrateLegacyBuiltInCatalogEntries()
     {
-        var defaults = CreateDefaultModelCatalog().Models;
-        foreach (var definition in defaults)
+        foreach (var definition in _modelCatalog.Models.Where(model => model.IsBuiltIn).ToArray())
         {
-            var existing = _modelCatalog.Models.FirstOrDefault(item => item.Id.Equals(definition.Id, StringComparison.OrdinalIgnoreCase));
-            if (existing is null)
+            if (!Directory.Exists(definition.RootDirectory))
             {
-                _modelCatalog.Models.Add(definition);
+                _modelCatalog.Models.Remove(definition);
                 continue;
             }
-            existing.DisplayName = definition.DisplayName;
-            existing.Description = definition.Description;
-            existing.Category = definition.Category;
-            existing.RootDirectory = definition.RootDirectory;
-            existing.Executable = definition.Executable;
-            existing.Arguments = definition.Arguments;
-            existing.Runtime = definition.Runtime;
-            existing.RuntimeVersion = definition.RuntimeVersion;
-            existing.Port = definition.Port;
-            existing.RecommendedVramMiB = definition.RecommendedVramMiB;
-            existing.RecommendedSystemMemoryMiB = definition.RecommendedSystemMemoryMiB;
-            existing.RequiredFiles = definition.RequiredFiles;
-            existing.Dependencies = definition.Dependencies;
-            existing.GitHubRepository = definition.GitHubRepository;
-            existing.GitHubBranch = definition.GitHubBranch;
-            existing.PackageSizeBytes = definition.PackageSizeBytes;
-            existing.PreservedPaths = definition.PreservedPaths;
-            if (string.IsNullOrWhiteSpace(existing.InstalledVersion) || existing.InstalledVersion == "local")
-            {
-                existing.InstalledVersion = definition.InstalledVersion;
-            }
-            existing.Publisher = definition.Publisher;
-            existing.TrustSource = definition.TrustSource;
-            existing.IsManifestTrusted = true;
-            existing.IsBuiltIn = true;
+            definition.IsBuiltIn = false;
+            definition.TrustSource = "LegacyLocal";
+            definition.IsManifestTrusted = true;
         }
     }
 
@@ -1742,8 +1725,7 @@ internal sealed class LauncherForm : Form
             L("AI 音频环境自检", "AI audio environment check"),
             new string('-', 42)
         };
-        var profiles = new List<ServiceProfile> { _woosh, _smallSfx, _indexTts };
-        profiles.AddRange(CustomModelDefinitions().Select(CreateCustomProfile));
+        var profiles = _modelCatalog.Models.Select(CreateCustomProfile).ToList();
         foreach (var profile in profiles)
         {
             var missing = GetMissingRequirements(profile);
@@ -1766,7 +1748,7 @@ internal sealed class LauncherForm : Form
         var resources = SystemResourceProbe.Capture();
         lines.Add(resources.GpuTotalMiB is null || resources.GpuUsedMiB is null
             ? L("GPU：无法读取 nvidia-smi", "GPU: nvidia-smi unavailable")
-            : L($"GPU 显存：{resources.GpuUsedMiB} / {resources.GpuTotalMiB} MiB", $"GPU memory: {resources.GpuUsedMiB} / {resources.GpuTotalMiB} MiB"));
+            : L($"GPU：{resources.GpuName}\r\nGPU 显存：{resources.GpuUsedMiB} / {resources.GpuTotalMiB} MiB", $"GPU: {resources.GpuName}\r\nGPU memory: {resources.GpuUsedMiB} / {resources.GpuTotalMiB} MiB"));
         lines.Add(L(
             $"系统内存：{resources.AvailableMemoryMiB:N0} / {resources.TotalMemoryMiB:N0} MiB 可用",
             $"System memory: {resources.AvailableMemoryMiB:N0} / {resources.TotalMemoryMiB:N0} MiB available"));
@@ -1987,10 +1969,9 @@ internal sealed class LauncherForm : Form
         EnsureDataDirectories(updated);
         _settings = updated;
         SaveSettings(_settings);
-        SyncBuiltInCatalogEntries();
         SaveModelCatalog(_modelCatalog);
         ConfigureProfiles();
-        _selectedStableProfile = _smallSfx;
+        _selectedStableProfile ??= _smallSfx;
         Controls.Clear();
         InitializeUi();
         RefreshStatus();
@@ -2192,7 +2173,7 @@ internal sealed class LauncherForm : Form
         }
 
         ConfigureProfiles();
-        _selectedStableProfile = _smallSfx;
+        _selectedStableProfile ??= _smallSfx;
         Controls.Clear();
         InitializeUi();
         RefreshStatus();
@@ -2247,7 +2228,7 @@ internal sealed class LauncherForm : Form
         result.Definition.TrustSource = "SignedCatalog";
         result.Definition.SigningKeyId = catalog.Signature.KeyId;
         result.Definition.IsManifestTrusted = true;
-        result.Definition.IsBuiltIn = existing?.IsBuiltIn == true;
+        result.Definition.IsBuiltIn = false;
         if (existing is not null && result.ReplacedPluginBackup is not null)
         {
             File.WriteAllText(
@@ -2286,7 +2267,7 @@ internal sealed class LauncherForm : Form
         menu.Items.Add(L("受信任发布者", "Trusted publishers"), null, (_, _) => ShowTrustedPublishersDialog());
         menu.Items.Add(L("删除 Hugging Face 登录凭据", "Delete Hugging Face credential"), null, (_, _) => DeleteHuggingFaceCredential());
         menu.Items.Add(new ToolStripSeparator());
-        menu.Items.Add(L("添加新模型", "Add new model"), null, (_, _) => ShowAddModelDialog());
+        menu.Items.Add(L("从 GitHub 添加模型", "Add model from GitHub"), null, async (_, _) => await ShowAddModelDialogAsync());
         menu.Items.Add(L("运行环境自检", "Run environment check"), null, (_, _) => ShowEnvironmentReport());
         menu.Items.Add(L("配置模型目录与端口", "Configure paths and ports"), null, (_, _) => ShowSettingsDialog());
         menu.Items.Add(L("恢复源码备份", "Restore source backup"), null, async (_, _) => await RestoreBackupAsync());
@@ -2640,9 +2621,9 @@ internal sealed class LauncherForm : Form
     private void UninstallSelectedPlugin()
     {
         var definition = _modelCatalog.Models.FirstOrDefault(model => model.Id.Equals(_selectedPluginId, StringComparison.OrdinalIgnoreCase));
-        if (definition is null || definition.IsBuiltIn)
+        if (definition is null)
         {
-            MessageBox.Show(L("内置插件不能通过此功能卸载。", "Built-in plugins cannot be removed with this command."), L("无法卸载", "Cannot uninstall"), MessageBoxButtons.OK, MessageBoxIcon.Information);
+            MessageBox.Show(L("请先选择一个已安装插件。", "Select an installed plugin first."), L("无法卸载", "Cannot uninstall"), MessageBoxButtons.OK, MessageBoxIcon.Information);
             return;
         }
         if (MessageBox.Show(
@@ -2762,7 +2743,7 @@ internal sealed class LauncherForm : Form
         dialog.ShowDialog(this);
     }
 
-    private void ShowAddModelDialog()
+    private async Task ShowAddModelDialogAsync()
     {
         using var dialog = new Form
         {
@@ -2780,7 +2761,7 @@ internal sealed class LauncherForm : Form
             Size = new Size(872, 570),
             Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right | AnchorStyles.Bottom,
             ColumnCount = 3,
-            RowCount = 14,
+            RowCount = 16,
             AutoScroll = true,
             BackColor = Theme.Card
         };
@@ -2798,19 +2779,14 @@ internal sealed class LauncherForm : Form
         table.Controls.Add(new Label { Text = L("分类", "Category"), Dock = DockStyle.Fill, TextAlign = ContentAlignment.MiddleLeft }, 0, 2);
         table.Controls.Add(category, 1, 2);
 
-        var root = AddTextRow(table, 3, L("模型目录 *", "Model root *"), string.Empty);
+        var root = AddTextRow(table, 3, L("托管安装目录", "Managed install root"), Path.Combine(_settings.DataRoot, "plugins"));
+        root.ReadOnly = true;
         var rootBrowse = new Button { Text = L("浏览…", "Browse..."), Dock = DockStyle.Fill, Margin = new Padding(6) };
-        rootBrowse.Click += (_, _) =>
-        {
-            using var picker = new FolderBrowserDialog { InitialDirectory = Directory.Exists(root.Text) ? root.Text : Environment.GetFolderPath(Environment.SpecialFolder.Desktop) };
-            if (picker.ShowDialog(dialog) == DialogResult.OK)
-            {
-                root.Text = picker.SelectedPath;
-            }
-        };
+        rootBrowse.Enabled = false;
+        rootBrowse.Text = L("自动", "Automatic");
         table.Controls.Add(rootBrowse, 2, 3);
 
-        var executable = AddTextRow(table, 4, L("启动程序 *", "Executable *"), string.Empty);
+        var executable = AddTextRow(table, 4, L("启动程序 *", "Executable *"), ".venv/Scripts/python.exe");
         var executableBrowse = new Button { Text = L("选择文件", "Choose file"), Dock = DockStyle.Fill, Margin = new Padding(6) };
         executableBrowse.Click += (_, _) =>
         {
@@ -2823,7 +2799,9 @@ internal sealed class LauncherForm : Form
         table.Controls.Add(executableBrowse, 2, 4);
 
         var arguments = AddTextRow(table, 5, L("启动参数", "Arguments"), string.Empty);
-        var port = new NumericUpDown { Minimum = 1024, Maximum = 65535, Value = 7862, Width = 180, Margin = new Padding(6) };
+        var usedPorts = _modelCatalog.Models.Select(model => model.Port).ToHashSet();
+        var suggestedPort = Enumerable.Range(7860, 1000).First(candidate => !usedPorts.Contains(candidate));
+        var port = new NumericUpDown { Minimum = 1024, Maximum = 65535, Value = suggestedPort, Width = 180, Margin = new Padding(6) };
         table.Controls.Add(new Label { Text = L("WebUI 端口", "WebUI port"), Dock = DockStyle.Fill, TextAlign = ContentAlignment.MiddleLeft }, 0, 6);
         table.Controls.Add(port, 1, 6);
         var vram = new NumericUpDown { Minimum = 0, Maximum = 32, DecimalPlaces = 1, Increment = 0.5M, Value = 4, Width = 180, Margin = new Padding(6) };
@@ -2832,79 +2810,156 @@ internal sealed class LauncherForm : Form
         var highVram = new CheckBox { Text = L("高显存模型，启动前警告", "High VRAM warning before launch"), AutoSize = true, Margin = new Padding(6, 9, 6, 6) };
         table.Controls.Add(highVram, 2, 7);
         var required = AddTextRow(table, 8, L("必需文件", "Required files"), string.Empty);
-        var repository = AddTextRow(table, 9, L("GitHub 仓库", "GitHub repository"), string.Empty);
+        var repository = AddTextRow(table, 9, L("GitHub 仓库 *", "GitHub repository *"), string.Empty);
+        repository.TextChanged += (_, _) =>
+        {
+            var safeName = repository.Text.Trim().Replace('/', '-').ToLowerInvariant();
+            root.Text = Path.Combine(_settings.DataRoot, "plugins", string.IsNullOrWhiteSpace(safeName) ? "owner-repository" : safeName);
+        };
         var branch = AddTextRow(table, 10, L("更新分支", "Update branch"), "main");
-        var version = AddTextRow(table, 11, L("本地版本", "Local version"), "local");
+        var version = AddTextRow(table, 11, L("安装版本", "Installed version"), L("自动使用 commit", "Pinned commit automatically"));
+        version.ReadOnly = true;
         var dependencies = AddTextRow(table, 12, L("依赖声明", "Dependencies"), string.Empty);
         var systemMemory = new NumericUpDown { Minimum = 0, Maximum = 256, DecimalPlaces = 1, Increment = 1, Value = 8, Width = 180, Margin = new Padding(6) };
         table.Controls.Add(new Label { Text = L("建议内存 (GB)", "Recommended RAM (GB)"), Dock = DockStyle.Fill, TextAlign = ContentAlignment.MiddleLeft }, 0, 13);
         table.Controls.Add(systemMemory, 1, 13);
+        var requirementsFile = AddTextRow(table, 14, L("Python 依赖文件", "Python requirements"), "requirements.txt");
+        var setupPython = new CheckBox
+        {
+            Text = L("安装托管 Python，并安装 requirements.txt 或 pyproject.toml", "Install managed Python and requirements.txt or pyproject.toml"),
+            Checked = true,
+            AutoSize = true,
+            Margin = new Padding(6, 9, 6, 6)
+        };
+        table.Controls.Add(new Label { Text = L("自动配置环境", "Environment setup"), Dock = DockStyle.Fill, TextAlign = ContentAlignment.MiddleLeft }, 0, 15);
+        table.Controls.Add(setupPython, 1, 15);
         dialog.Controls.Add(table);
 
         var hint = new Label
         {
-            Text = L("支持 {root} 和 {port} 占位符；必需文件使用分号分隔。GitHub 仓库填写 owner/repository 后将纳入更新检查。", "Use {root} and {port} placeholders; separate required files with semicolons. Enter owner/repository to include GitHub update checks."),
+            Text = L("仓库会先固定到 commit 再下载。启动程序使用相对路径；Python 项目通常填写 .venv/Scripts/python.exe，并把入口脚本写入启动参数。", "The repository is pinned to a commit before download. Use a relative executable path; Python projects normally use .venv/Scripts/python.exe and put the entry script in Arguments."),
             Location = new Point(26, 602),
             Size = new Size(650, 48),
             ForeColor = Theme.Muted
         };
         dialog.Controls.Add(hint);
         var cancel = new Button { Text = L("取消", "Cancel"), DialogResult = DialogResult.Cancel, Location = new Point(674, 620), Size = new Size(104, 38), Anchor = AnchorStyles.Bottom | AnchorStyles.Right };
-        var add = new Button { Text = L("添加模型", "Add model"), Location = new Point(790, 620), Size = new Size(104, 38), Anchor = AnchorStyles.Bottom | AnchorStyles.Right };
-        add.Click += (_, _) =>
+        var add = new Button { Text = L("下载并添加", "Download and add"), Location = new Point(766, 620), Size = new Size(128, 38), Anchor = AnchorStyles.Bottom | AnchorStyles.Right };
+        add.Click += async (_, _) =>
         {
-            if (string.IsNullOrWhiteSpace(name.Text) || string.IsNullOrWhiteSpace(root.Text) || string.IsNullOrWhiteSpace(executable.Text))
+            if (string.IsNullOrWhiteSpace(name.Text) || string.IsNullOrWhiteSpace(repository.Text) || string.IsNullOrWhiteSpace(executable.Text))
             {
-                MessageBox.Show(L("请填写模型名称、模型目录和启动程序。", "Enter the model name, root directory, and executable."), L("信息不完整", "Information incomplete"), MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                MessageBox.Show(L("请填写模型名称、GitHub 仓库和启动程序。", "Enter the model name, GitHub repository, and executable."), L("信息不完整", "Information incomplete"), MessageBoxButtons.OK, MessageBoxIcon.Warning);
                 return;
             }
-            if (!string.IsNullOrWhiteSpace(repository.Text) && repository.Text.Trim().Split('/').Length != 2)
+            if (repository.Text.Trim().Split('/').Length != 2)
             {
                 MessageBox.Show(L("GitHub 仓库格式应为 owner/repository。", "GitHub repository must use owner/repository format."), L("仓库格式", "Repository format"), MessageBoxButtons.OK, MessageBoxIcon.Warning);
                 return;
             }
-            var configuredPorts = new[] { _settings.WooshPort, _settings.StablePort, _settings.IndexTtsPort }
-                .Concat(CustomModelDefinitions().Select(definition => definition.Port));
+            if (Path.IsPathRooted(executable.Text.Trim()) || executable.Text.Contains("..", StringComparison.Ordinal))
+            {
+                MessageBox.Show(L("启动程序必须是下载目录内的安全相对路径。", "Executable must be a safe path relative to the downloaded repository."), L("启动路径无效", "Invalid launch path"), MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return;
+            }
+            var configuredPorts = _modelCatalog.Models.Select(definition => definition.Port);
             if (configuredPorts.Contains((int)port.Value))
             {
                 MessageBox.Show(L("该端口已经由现有模型配置使用。请为新模型分配一个不同端口。", "That port is already assigned to an existing model configuration. Choose a different port."), L("端口冲突", "Port conflict"), MessageBoxButtons.OK, MessageBoxIcon.Warning);
                 return;
             }
-            if (!Directory.Exists(root.Text.Trim()) && MessageBox.Show(
-                    L("模型目录暂时不存在。仍保存配置吗？", "The model directory does not exist yet. Save the configuration anyway?"),
-                    L("目录检查", "Directory check"), MessageBoxButtons.YesNo, MessageBoxIcon.Warning) != DialogResult.Yes)
+            var id = repository.Text.Trim().Replace('/', '-').ToLowerInvariant();
+            if (_modelCatalog.Models.Any(model => model.Id.Equals(id, StringComparison.OrdinalIgnoreCase)))
             {
+                MessageBox.Show(L("这个 GitHub 仓库已经添加。", "This GitHub repository has already been added."), L("重复插件", "Duplicate plugin"), MessageBoxButtons.OK, MessageBoxIcon.Warning);
                 return;
             }
-            var definition = new LauncherModelDefinition
+            add.Enabled = false;
+            cancel.Enabled = false;
+            try
             {
-                DisplayName = name.Text.Trim(),
-                Description = description.Text.Trim(),
-                Category = string.IsNullOrWhiteSpace(category.Text) ? "Experimental" : category.Text.Trim(),
-                RootDirectory = root.Text.Trim(),
-                Executable = executable.Text.Trim(),
-                Arguments = arguments.Text.Trim(),
-                Port = (int)port.Value,
-                RecommendedVramMiB = (int)(vram.Value * 1024M),
-                RecommendedSystemMemoryMiB = (int)(systemMemory.Value * 1024M),
-                IsHighVram = highVram.Checked,
-                RequiredFiles = required.Text.Split(';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).Select(item => item.Replace('\\', '/')).ToArray(),
-                Dependencies = dependencies.Text.Split(';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries),
-                GitHubRepository = repository.Text.Trim(),
-                GitHubBranch = string.IsNullOrWhiteSpace(branch.Text) ? "main" : branch.Text.Trim(),
-                InstalledVersion = string.IsNullOrWhiteSpace(version.Text) ? "local" : version.Text.Trim(),
-                Publisher = L("本机用户", "Local user"),
-                TrustSource = "LocalUser"
-            };
-            _modelCatalog.Models.Add(definition);
-            SaveModelCatalog(_modelCatalog);
-            ConfigureProfiles();
-            Controls.Clear();
-            InitializeUi();
-            RefreshStatus();
-            AppendLog(L($"已添加模型：{definition.DisplayName}", $"Model added: {definition.DisplayName}"));
-            dialog.DialogResult = DialogResult.OK;
-            dialog.Close();
+                var importProgress = new Progress<string>(message =>
+                {
+                    hint.Text = message;
+                    AppendLog(message);
+                });
+                var imported = await _gitHubModelImportService.ImportAsync(
+                    repository.Text,
+                    branch.Text,
+                    _settings.DataRoot,
+                    importProgress);
+                root.Text = imported.RootDirectory;
+
+                if (setupPython.Checked)
+                {
+                    var requirementsRelative = requirementsFile.Text.Trim().Replace('\\', '/');
+                    var hasRequirements = !string.IsNullOrWhiteSpace(requirementsRelative) && File.Exists(Path.Combine(imported.RootDirectory, requirementsRelative.Replace('/', Path.DirectorySeparatorChar)));
+                    var hasPyProject = File.Exists(Path.Combine(imported.RootDirectory, "pyproject.toml"));
+                    var environmentManifest = new PluginPackageManifest
+                    {
+                        Runtime = "python",
+                        RuntimeVersion = ">=3.12",
+                        CreateVirtualEnvironment = true,
+                        VirtualEnvironmentPath = ".venv",
+                        RequirementsFile = hasRequirements ? requirementsRelative : string.Empty,
+                        ManagedRuntimeId = ManagedPythonRuntimeService.Python312.Id,
+                        PythonInstallArguments = hasPyProject ? ["-m", "pip", "install", "--disable-pip-version-check", "-e", "."] : []
+                    };
+                    await PythonEnvironmentService.EnsureAsync(environmentManifest, imported.RootDirectory, _settings.DataRoot, GitHubClient, importProgress);
+                }
+
+                var declaredDependencies = dependencies.Text.Split(';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).ToList();
+                if (setupPython.Checked && !declaredDependencies.Any(item => item.StartsWith("python", StringComparison.OrdinalIgnoreCase)))
+                {
+                    declaredDependencies.Insert(0, "python>=3.12");
+                }
+                var definition = new LauncherModelDefinition
+                {
+                    Id = id,
+                    DisplayName = name.Text.Trim(),
+                    Description = description.Text.Trim(),
+                    Category = string.IsNullOrWhiteSpace(category.Text) ? "Experimental" : category.Text.Trim(),
+                    RootDirectory = imported.RootDirectory,
+                    Executable = executable.Text.Trim().Replace('\\', '/'),
+                    Arguments = arguments.Text.Trim(),
+                    Runtime = setupPython.Checked ? "python" : "custom",
+                    RuntimeVersion = setupPython.Checked ? ">=3.12" : string.Empty,
+                    Port = (int)port.Value,
+                    RecommendedVramMiB = (int)(vram.Value * 1024M),
+                    RecommendedSystemMemoryMiB = (int)(systemMemory.Value * 1024M),
+                    IsHighVram = highVram.Checked,
+                    RequiredFiles = required.Text.Split(';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).Select(item => item.Replace('\\', '/')).ToArray(),
+                    Dependencies = declaredDependencies.ToArray(),
+                    GitHubRepository = repository.Text.Trim(),
+                    GitHubBranch = string.IsNullOrWhiteSpace(branch.Text) ? "main" : branch.Text.Trim(),
+                    InstalledVersion = imported.CommitSha[..12],
+                    Publisher = repository.Text.Trim().Split('/')[0],
+                    TrustSource = "GitHubUserImport",
+                    PreservedPaths = [".venv", "models", "checkpoints", "outputs", "logs"]
+                };
+                var missing = GetMissingRequirements(CreateCustomProfile(definition));
+                if (missing.Count > 0)
+                {
+                    throw new InvalidOperationException(L("下载完成，但启动配置仍缺少：\n", "Download completed, but the launch configuration is missing:\n") + string.Join(Environment.NewLine, missing));
+                }
+                _modelCatalog.Models.Add(definition);
+                SaveModelCatalog(_modelCatalog);
+                ConfigureProfiles();
+                Controls.Clear();
+                InitializeUi();
+                RefreshStatus();
+                AppendLog(L($"已从 GitHub 安装模型：{definition.DisplayName} ({definition.InstalledVersion})", $"Model installed from GitHub: {definition.DisplayName} ({definition.InstalledVersion})"));
+                dialog.DialogResult = DialogResult.OK;
+                dialog.Close();
+            }
+            catch (Exception ex)
+            {
+                hint.Text = ex.Message;
+                AppendLog(L("GitHub 模型安装失败：", "GitHub model installation failed: ") + ex.Message, null, true);
+                MessageBox.Show(ex.Message, L("安装失败", "Installation failed"), MessageBoxButtons.OK, MessageBoxIcon.Error);
+                add.Enabled = true;
+                cancel.Enabled = true;
+            }
         };
         dialog.Controls.Add(cancel);
         dialog.Controls.Add(add);
@@ -2948,9 +3003,10 @@ internal sealed class LauncherForm : Form
         _phaseLabel.Text = L(_phaseChinese, _phaseEnglish);
         header.Controls.Add(_phaseLabel);
 
-        var gpuPanel = new Panel { Size = new Size(270, 54), BackColor = Theme.DeepTeal };
-        gpuPanel.Controls.Add(CreateText("RTX 5060", new Rectangle(0, 2, 96, 21), 8F, Color.FromArgb(166, 221, 210), FontStyle.Bold));
-        _gpuSummaryLabel = CreateText(L("正在读取显存", "Reading GPU memory"), new Rectangle(98, 2, 170, 21), 8F, Color.White, FontStyle.Bold, ContentAlignment.MiddleRight);
+        var gpuPanel = new Panel { Size = new Size(400, 54), BackColor = Theme.DeepTeal };
+        _gpuNameLabel = CreateText(L("正在检测 GPU", "Detecting GPU"), new Rectangle(0, 2, 226, 21), 8F, Color.FromArgb(166, 221, 210), FontStyle.Bold);
+        gpuPanel.Controls.Add(_gpuNameLabel);
+        _gpuSummaryLabel = CreateText(L("正在读取显存", "Reading GPU memory"), new Rectangle(230, 2, 168, 21), 8F, Color.White, FontStyle.Bold, ContentAlignment.MiddleRight);
         gpuPanel.Controls.Add(_gpuSummaryLabel);
         _gpuMeter = new GpuMeter { Location = new Point(0, 31), Size = new Size(268, 9) };
         gpuPanel.Controls.Add(_gpuMeter);
@@ -3253,9 +3309,9 @@ internal sealed class LauncherForm : Form
             BackColor = Color.White,
             WrapContents = false
         };
-        AddStableModeButton(_stableModePanel, "small-sfx", _smallSfx);
-        AddStableModeButton(_stableModePanel, "small-music", _smallMusic);
-        AddStableModeButton(_stableModePanel, "medium", _medium);
+        if (_smallSfx is not null) AddStableModeButton(_stableModePanel, "small-sfx", _smallSfx);
+        if (_smallMusic is not null) AddStableModeButton(_stableModePanel, "small-music", _smallMusic);
+        if (_medium is not null) AddStableModeButton(_stableModePanel, "medium", _medium);
         detailPanel.Controls.Add(_stableModePanel);
 
         _detailPrimaryButton = CreateActionButton(L("启动插件", "Launch plugin"), Theme.DeepTeal, 210);
@@ -3290,28 +3346,35 @@ internal sealed class LauncherForm : Form
         Controls.Add(header);
         LayoutHeader();
         LayoutLogCard();
-        SelectPlugin(_pluginEntries.Any(entry => entry.Id == _selectedPluginId) ? _selectedPluginId : _pluginEntries[0].Id);
+        if (_pluginEntries.Count > 0)
+        {
+            SelectPlugin(_pluginEntries.Any(entry => entry.Id == _selectedPluginId) ? _selectedPluginId : _pluginEntries[0].Id);
+        }
+        else
+        {
+            UpdatePluginUi();
+        }
         RenderLog();
         UpdateGpuIndicator();
     }
 
     private List<PluginUiEntry> BuildPluginEntries()
     {
-        var entries = new List<PluginUiEntry>
+        return _modelCatalog.Models.Select(definition =>
         {
-            new("woosh-dflow", "Woosh-DFlow", L("从文字提示生成短音效与环境声。", "Generate short effects and ambient sound from text prompts."), L("声音设计", "Sound design"), _woosh, 6800, Theme.MidTeal),
-            new("stable-audio-3", "Stable Audio 3", L("在启动前选择音效、音乐或 medium 模型。", "Choose SFX, music, or medium before launch."), L("音频生成", "Audio generation"), _selectedStableProfile, 2200, Color.FromArgb(29, 117, 105), true),
-            new("indextts2", "IndexTTS2", L("生成角色语音、音色克隆与情绪化对白。", "Create character voices, voice clones, and emotional dialogue."), L("角色语音", "Character voice"), _indexTts, 7500, Color.FromArgb(54, 87, 139))
-        };
-        entries.AddRange(CustomModelDefinitions().Select(definition => new PluginUiEntry(
-            definition.Id,
-            definition.DisplayName,
-            string.IsNullOrWhiteSpace(definition.Description) ? L("由插件目录配置驱动的本地服务。", "Local service managed by the plugin catalog.") : definition.Description,
-            definition.Category,
-            CreateCustomProfile(definition),
-            definition.RecommendedVramMiB,
-            CategoryAccent(definition.Category))));
-        return entries;
+            var hasStableSelector = definition.Id.Equals("stable-audio-3", StringComparison.OrdinalIgnoreCase) &&
+                _selectedStableProfile is not null && _smallSfx is not null && _smallMusic is not null && _medium is not null;
+            var profile = hasStableSelector ? _selectedStableProfile! : CreateCustomProfile(definition);
+            return new PluginUiEntry(
+                definition.Id,
+                definition.DisplayName,
+                string.IsNullOrWhiteSpace(definition.Description) ? L("从 GitHub 导入的本地 AI 服务。", "Local AI service imported from GitHub.") : definition.Description,
+                definition.Category,
+                profile,
+                definition.RecommendedVramMiB,
+                CategoryAccent(definition.Category),
+                hasStableSelector);
+        }).ToList();
     }
 
     private void RebuildPluginList()
@@ -3359,7 +3422,9 @@ internal sealed class LauncherForm : Form
                 AutoSize = false,
                 Width = Math.Max(260, _pluginList.ClientSize.Width - 12),
                 Height = 86,
-                Text = L("没有符合当前条件的插件。", "No plugins match the current filters."),
+                Text = _pluginEntries.Count == 0
+                    ? L("尚未安装插件。\r\n请从 GitHub 添加模型。", "No plugins installed.\r\nAdd a model from GitHub.")
+                    : L("没有符合当前条件的插件。", "No plugins match the current filters."),
                 TextAlign = ContentAlignment.MiddleCenter,
                 ForeColor = Theme.Muted,
                 Font = new Font("Microsoft YaHei UI", 9F)
@@ -3454,7 +3519,8 @@ internal sealed class LauncherForm : Form
 
     private ServiceRuntimeState GetRuntimeState(ServiceProfile profile)
     {
-        if (GetMissingRequirements(profile).Count > 0)
+        if (GetMissingRequirements(profile).Count > 0 ||
+            PluginDependencyChecker.Check(profile.Dependencies, profile.WorkingDirectory).Any(check => check.IsEnforced && !check.IsSatisfied))
         {
             return ServiceRuntimeState.Missing;
         }
@@ -3477,6 +3543,17 @@ internal sealed class LauncherForm : Form
     {
         if (_pluginEntries.Count == 0)
         {
+            if (_detailTitleLabel is not null) _detailTitleLabel.Text = L("尚未安装插件", "No plugins installed");
+            if (_detailDescriptionLabel is not null) _detailDescriptionLabel.Text = L("使用“工具 > 从 GitHub 添加模型”下载并配置第一个模型。", "Use Tools > Add model from GitHub to download and configure your first model.");
+            if (_detailStatusLabel is not null) _detailStatusLabel.Text = L("插件库为空", "Plugin library is empty");
+            if (_detailRootLabel is not null) _detailRootLabel.Text = string.Empty;
+            if (_detailPortLabel is not null) _detailPortLabel.Text = string.Empty;
+            if (_detailMemoryLabel is not null) _detailMemoryLabel.Text = string.Empty;
+            if (_detailVersionLabel is not null) _detailVersionLabel.Text = string.Empty;
+            if (_detailDependencyLabel is not null) _detailDependencyLabel.Text = string.Empty;
+            if (_detailTrustLabel is not null) _detailTrustLabel.Text = string.Empty;
+            if (_stableModePanel is not null) _stableModePanel.Visible = false;
+            if (_detailPrimaryButton is not null) _detailPrimaryButton.Enabled = false;
             return;
         }
         foreach (var entry in _pluginEntries)
@@ -3565,19 +3642,21 @@ internal sealed class LauncherForm : Form
 
     private void UpdateGpuIndicator()
     {
-        var gpu = GetGpuMemoryUsage();
-        if (_gpuSummaryLabel is null || _gpuMeter is null)
+        var gpu = SystemResourceProbe.ReadPrimaryGpu();
+        if (_gpuNameLabel is null || _gpuSummaryLabel is null || _gpuMeter is null)
         {
             return;
         }
         if (gpu is null)
         {
+            _gpuNameLabel.Text = L("未检测到 NVIDIA GPU", "NVIDIA GPU not detected");
             _gpuSummaryLabel.Text = L("显存不可用", "GPU unavailable");
             _gpuMeter.SetValue(0, 1);
             return;
         }
-        _gpuSummaryLabel.Text = $"{gpu.Value.UsedMiB:N0} / {gpu.Value.TotalMiB:N0} MiB";
-        _gpuMeter.SetValue(gpu.Value.UsedMiB, gpu.Value.TotalMiB);
+        _gpuNameLabel.Text = gpu.Name;
+        _gpuSummaryLabel.Text = $"{gpu.UsedMiB:N0} / {gpu.TotalMiB:N0} MiB";
+        _gpuMeter.SetValue(gpu.UsedMiB, gpu.TotalMiB);
     }
 
     private void ToggleLogDrawer()
@@ -3740,10 +3819,7 @@ internal sealed class LauncherForm : Form
             BackColor = Color.Transparent,
             WrapContents = true
         };
-        models.Controls.Add(CreateServiceCard("01  /  SOUND DESIGN", "Woosh-DFlow", L("从文字提示生成短音效与环境声。", "Generate short effects and ambient sound from text prompts."), Capability(_woosh, "TEXT TO SFX"), L("启动 Woosh", "Launch Woosh"), Theme.MidTeal, () => _ = StartServiceAsync(_woosh)));
-        models.Controls.Add(CreateServiceCard("02  /  AUDIO GENERATION", "Stable Audio 3", L("先选择音效、音乐或 medium 模型，再启动服务。", "Choose an SFX, music, or medium model before starting."), Capability(_smallSfx, "3 LOCAL MODELS"), L("选择模型", "Choose model"), Color.FromArgb(29, 117, 105), ShowStableModelSelector));
-        models.Controls.Add(CreateServiceCard("03  /  CHARACTER VOICE", "IndexTTS2", L("以授权参考音频生成角色语音与情绪化对白。", "Create character voices and emotional dialogue from authorized references."), Capability(_indexTts, "VOICE & EMOTION"), L("启动 IndexTTS", "Launch IndexTTS"), Color.FromArgb(54, 87, 139), () => _ = StartServiceAsync(_indexTts)));
-        var modelNumber = 4;
+        var modelNumber = 1;
         foreach (var definition in CustomModelDefinitions())
         {
             var profile = CreateCustomProfile(definition);
@@ -3977,6 +4053,10 @@ internal sealed class LauncherForm : Form
 
     private void ShowStableModelSelector()
     {
+        if (_smallSfx is null || _smallMusic is null || _medium is null)
+        {
+            return;
+        }
         using var dialog = new StableModelSelectorForm(_smallSfx, _smallMusic, _medium, _useEnglish);
         if (dialog.ShowDialog(this) == DialogResult.OK && dialog.SelectedProfile is not null)
         {
@@ -4060,6 +4140,18 @@ internal sealed class LauncherForm : Form
                 profile);
             return;
         }
+        var dependencyFailures = PluginDependencyChecker.Check(profile.Dependencies, profile.WorkingDirectory)
+            .Where(check => check.IsEnforced && !check.IsSatisfied)
+            .ToArray();
+        if (dependencyFailures.Length > 0)
+        {
+            var details = string.Join(Environment.NewLine, dependencyFailures.Select(check => $"{check.Requirement}: {check.Details}"));
+            SetServiceRuntimeState(profile, ServiceRuntimeState.Missing);
+            SetRuntimePhase("插件依赖未就绪", $"{profile.Name} dependencies are not ready");
+            AppendLog(L("依赖检查失败：", "Dependency check failed: ") + details.Replace(Environment.NewLine, " | "), profile, true);
+            ShowActionableError(L("插件依赖未就绪", "Plugin dependencies are not ready"), details, profile);
+            return;
+        }
 
         var knownPids = GetKnownServicePids();
         var occupied = GetListeningPids(profile.Port);
@@ -4116,10 +4208,13 @@ internal sealed class LauncherForm : Form
                 StandardOutputEncoding = Encoding.UTF8,
                 StandardErrorEncoding = Encoding.UTF8
             };
-            if (profile.WorkingDirectory.Equals(_settings.StableRoot, StringComparison.OrdinalIgnoreCase))
+            if (definition?.Runtime.Equals("python", StringComparison.OrdinalIgnoreCase) == true ||
+                profile.Executable.EndsWith("python.exe", StringComparison.OrdinalIgnoreCase))
             {
                 startInfo.Environment["HF_HUB_DISABLE_XET"] = "1";
                 startInfo.Environment["PYTHONUNBUFFERED"] = "1";
+                startInfo.Environment["PYTHONUTF8"] = "1";
+                startInfo.Environment["PYTHONIOENCODING"] = "utf-8";
                 if (profile.IsMedium)
                 {
                     startInfo.Environment["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True";
@@ -4137,7 +4232,7 @@ internal sealed class LauncherForm : Form
                     _activeService = null;
                     _openButton.Enabled = false;
                     SetRuntimePhase("服务进程已退出", $"{profile.Name} exited");
-                    AppendLog(L($"服务进程已退出（PID {process.Id}）。", $"Service process exited (PID {process.Id})."), profile, true);
+                    AppendLog(L($"服务进程已退出（PID {process.Id}，退出码 {process.ExitCode}）。", $"Service process exited (PID {process.Id}, exit code {process.ExitCode})."), profile, true);
                     SetServiceRuntimeState(profile, ServiceRuntimeState.Error);
                 }
                 RefreshStatus();
@@ -4318,15 +4413,20 @@ internal sealed class LauncherForm : Form
 
     private void RefreshStatus()
     {
-        var wooshPids = GetListeningPids(_settings.WooshPort);
-        var stablePids = GetListeningPids(_settings.StablePort);
-        var indexPids = GetListeningPids(_settings.IndexTtsPort);
         var known = GetKnownServicePids();
         var gpu = GetGpuMemoryUsage();
         var parts = new List<string>();
-        parts.Add(wooshPids.Count > 0 ? L($"Woosh {_settings.WooshPort} 正在监听", $"Woosh {_settings.WooshPort} listening") : L($"Woosh {_settings.WooshPort} 未监听", $"Woosh {_settings.WooshPort} idle"));
-        parts.Add(stablePids.Count > 0 ? L($"Stable {_settings.StablePort} 正在监听", $"Stable {_settings.StablePort} listening") : L($"Stable {_settings.StablePort} 未监听", $"Stable {_settings.StablePort} idle"));
-        parts.Add(indexPids.Count > 0 ? L($"IndexTTS {_settings.IndexTtsPort} 正在监听", $"IndexTTS {_settings.IndexTtsPort} listening") : L($"IndexTTS {_settings.IndexTtsPort} 未监听", $"IndexTTS {_settings.IndexTtsPort} idle"));
+        foreach (var definition in _modelCatalog.Models.Take(3))
+        {
+            var listening = GetListeningPids(definition.Port).Count > 0;
+            parts.Add(listening
+                ? L($"{definition.DisplayName} {definition.Port} 正在监听", $"{definition.DisplayName} {definition.Port} listening")
+                : L($"{definition.DisplayName} {definition.Port} 未监听", $"{definition.DisplayName} {definition.Port} idle"));
+        }
+        if (_modelCatalog.Models.Count == 0)
+        {
+            parts.Add(L("尚未安装插件", "No plugins installed"));
+        }
         parts.Add(known.Count > 0 ? L($"已识别 AI 进程：{string.Join(",", known)}", $"Recognized AI processes: {string.Join(",", known)}") : L("未检测到已识别 AI 进程", "No recognized AI process"));
         if (gpu is not null)
         {
@@ -4343,8 +4443,7 @@ internal sealed class LauncherForm : Form
 
     private List<int> GetKnownServicePids()
     {
-        var roots = new[] { _settings.WooshRoot, _settings.StableRoot, _settings.IndexTtsRoot }
-            .Concat(CustomModelDefinitions().Select(definition => definition.RootDirectory))
+        var roots = _modelCatalog.Models.Select(definition => definition.RootDirectory)
             .Where(path => !string.IsNullOrWhiteSpace(path))
             .Distinct(StringComparer.OrdinalIgnoreCase);
         return PluginProcessService.FindProcessesByPluginRoots(roots);
@@ -4393,6 +4492,7 @@ internal sealed class LauncherForm : Form
             $"Process architecture: {System.Runtime.InteropServices.RuntimeInformation.ProcessArchitecture}",
             $"Data root: {_settings.DataRoot}",
             $"Timestamp: {DateTimeOffset.Now:O}",
+            $"GPU: {SystemResourceProbe.ReadPrimaryGpu()?.Name ?? "Unavailable"}",
             "",
             "Runtime log:"
         };

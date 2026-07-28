@@ -175,7 +175,7 @@ internal sealed class FirstRunWizardForm : Form
         var resources = SystemResourceProbe.Capture();
         var gpu = resources.GpuTotalMiB is null
             ? T("未能通过 nvidia-smi 读取 NVIDIA GPU。", "NVIDIA GPU could not be read with nvidia-smi.")
-            : T($"NVIDIA GPU 显存：{resources.GpuTotalMiB:N0} MiB", $"NVIDIA GPU memory: {resources.GpuTotalMiB:N0} MiB");
+            : T($"GPU：{resources.GpuName}\r\n显存：{resources.GpuTotalMiB:N0} MiB", $"GPU: {resources.GpuName}\r\nMemory: {resources.GpuTotalMiB:N0} MiB");
         var text = $"{gpu}\r\n{T("系统内存", "System memory")}: {resources.TotalMemoryMiB:N0} MiB\r\n{T("可用内存", "Available memory")}: {resources.AvailableMemoryMiB:N0} MiB\r\n{T("系统", "System")}: {Environment.OSVersion}\r\n\r\n{T("资源不足会显示警告，但不会阻止安装；一次只运行一个大型模型。", "Insufficient resources produce a warning but do not block installation. Run one large model at a time.")}";
         _content.Controls.Add(new Label { Text = text, Location = new Point(38, 112), Size = new Size(820, 300), ForeColor = Theme.Ink, Font = new Font("Microsoft YaHei UI", 11F) });
     }
