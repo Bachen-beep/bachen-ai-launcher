@@ -49,7 +49,7 @@ jobs:
           if ($files[0].Length -lt 1MB) { throw "Published launcher is unexpectedly small." }
 
       - name: Upload verified launcher
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: bachen-ai-launcher-win-x64
           path: artifacts/release/BaChen AI Launcher.exe
