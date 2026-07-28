@@ -12,10 +12,12 @@
 
 - Keep `LAUNCHER_UPDATE_PRIVATE_KEY_BASE64` in GitHub Actions secrets only.
 - Back up the update signing key in an encrypted credential vault.
-- Build only the launcher, installer, signed update manifest, and checksums.
+- Build only the launcher, installer, signed update manifest, checksums, and SBOM.
+- Generate and publish the SPDX SBOM for every release.
 - Require Artifact Attestation for both executable files.
 - Require the post-publication SHA-256 and Attestation verification step.
 - State the SmartScreen limitation when Authenticode is unavailable.
+- Follow `UpdateSigningKeyRotation.md` for scheduled rotation or key compromise.
 
 ## Test evidence
 

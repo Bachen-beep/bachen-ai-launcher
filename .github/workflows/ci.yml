@@ -54,3 +54,33 @@ jobs:
           name: bachen-ai-launcher-win-x64
           path: artifacts/release/BaChen AI Launcher.exe
           if-no-files-found: error
+
+  compatibility:
+    name: Windows 2022 compatibility
+    runs-on: windows-2022
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Set up .NET 10
+        uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Build and self-test
+        shell: pwsh
+        run: |
+          dotnet build ".\BaChen AI Launcher.csproj" -c Release
+          $report = Join-Path $env:RUNNER_TEMP "launcher-self-tests-windows-2022.txt"
+          dotnet ".\bin\Release\net10.0-windows\BaChen AI Launcher.dll" --self-test $report
+          if ($LASTEXITCODE -ne 0) { Get-Content $report; exit $LASTEXITCODE }
+          Get-Content $report
+
+      - name: Verify self-contained launcher
+        shell: pwsh
+        run: |
+          .\scripts\Publish.ps1
+          $report = Join-Path $env:RUNNER_TEMP "published-launcher-self-tests.txt"
+          & ".\artifacts\release\BaChen AI Launcher.exe" --self-test $report
+          if ($LASTEXITCODE -ne 0) { Get-Content $report; exit $LASTEXITCODE }
+          Get-Content $report

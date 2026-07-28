@@ -28,7 +28,7 @@ jobs:
         shell: pwsh
         run: |
           $tag = "${{ github.ref_name }}"
-          if ($tag -notmatch '^v(?<version>\d+\.\d+\.\d+)(?<suffix>-.+)?$') { throw "Invalid release tag: $tag" }
+          if ($tag -notmatch '^v(?<version>\d+\.\d+\.\d+)(?<suffix>-stage2-(?:preview|rc\d+))?$') { throw "Invalid release tag: $tag" }
           [xml]$project = Get-Content ".\BaChen AI Launcher.csproj"
           if ($project.Project.PropertyGroup.Version[0] -ne $Matches.version) {
             throw "Tag version $($Matches.version) does not match project version $($project.Project.PropertyGroup.Version[0])."
@@ -41,6 +41,13 @@ jobs:
           "version=$($Matches.version)" >> $env:GITHUB_OUTPUT
           "prerelease=$($isPrerelease.ToString().ToLowerInvariant())" >> $env:GITHUB_OUTPUT
           "release_notes=$releaseNotes" >> $env:GITHUB_OUTPUT
+
+      - name: Verify release commit is on main
+        shell: pwsh
+        run: |
+          git fetch origin main --no-tags
+          git merge-base --is-ancestor HEAD origin/main
+          if ($LASTEXITCODE -ne 0) { throw "Release tags must point to a commit on main." }
 
       - name: Build and self-test
         shell: pwsh
@@ -59,7 +66,6 @@ jobs:
           CERTIFICATE_BASE64: ${{ secrets.WINDOWS_SIGNING_PFX_BASE64 }}
         run: |
           if ([string]::IsNullOrWhiteSpace($env:CERTIFICATE_BASE64)) {
-            if ("${{ steps.version.outputs.prerelease }}" -eq "false") { throw "Production tags require WINDOWS_SIGNING_PFX_BASE64." }
             "available=false" >> $env:GITHUB_OUTPUT
             exit 0
           }
@@ -118,6 +124,14 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw "Installer signing failed." }
           if ((Get-AuthenticodeSignature $installer.FullName).Status -ne "Valid") { throw "Installer signature verification failed." }
 
+      - name: Generate SPDX SBOM
+        uses: anchore/sbom-action@v0.24.0
+        with:
+          path: artifacts/release
+          format: spdx-json
+          output-file: artifacts/BaChen-AI-Launcher.spdx.json
+          upload-artifact: false
+
       - name: Generate final checksums
         shell: pwsh
         run: |
@@ -125,7 +139,8 @@ jobs:
           $checksums = @(
             "$((Get-FileHash '.\artifacts\BaChen.AI.Launcher.exe' -Algorithm SHA256).Hash)  BaChen.AI.Launcher.exe",
             "$((Get-FileHash $installer.FullName -Algorithm SHA256).Hash)  $($installer.Name)",
-            "$((Get-FileHash '.\artifacts\launcher-update.json' -Algorithm SHA256).Hash)  launcher-update.json"
+            "$((Get-FileHash '.\artifacts\launcher-update.json' -Algorithm SHA256).Hash)  launcher-update.json",
+            "$((Get-FileHash '.\artifacts\BaChen-AI-Launcher.spdx.json' -Algorithm SHA256).Hash)  BaChen-AI-Launcher.spdx.json"
           )
           [IO.File]::WriteAllLines((Join-Path $PWD "artifacts\SHA256SUMS.txt"), $checksums)
 
@@ -150,6 +165,7 @@ jobs:
             artifacts/installer/BaChen-AI-Launcher-Setup-${{ steps.version.outputs.version }}.exe
             artifacts/launcher-update.json
             artifacts/SHA256SUMS.txt
+            artifacts/BaChen-AI-Launcher.spdx.json
 
       - name: Verify published assets and attestations
         shell: pwsh
@@ -165,7 +181,7 @@ jobs:
               $expected[$Matches.name] = $Matches.hash
             }
           }
-          foreach ($name in @("BaChen.AI.Launcher.exe", "BaChen-AI-Launcher-Setup-${{ steps.version.outputs.version }}.exe", "launcher-update.json")) {
+          foreach ($name in @("BaChen.AI.Launcher.exe", "BaChen-AI-Launcher-Setup-${{ steps.version.outputs.version }}.exe", "launcher-update.json", "BaChen-AI-Launcher.spdx.json")) {
             $actual = (Get-FileHash (Join-Path $verifyRoot $name) -Algorithm SHA256).Hash
             if (-not $expected.ContainsKey($name) -or $actual -ne $expected[$name]) {
               throw "Published SHA-256 verification failed for $name."

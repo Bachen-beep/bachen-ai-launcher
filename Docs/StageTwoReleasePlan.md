@@ -15,6 +15,7 @@
 2. `BaChen-AI-Launcher-Setup-<version>.exe`: lightweight installer.
 3. `launcher-update.json`: signed update metadata for the standalone EXE.
 4. SHA-256 checksum file and GitHub release notes.
+5. SPDX JSON software bill of materials (SBOM).
 
 ## Acceptance criteria
 
