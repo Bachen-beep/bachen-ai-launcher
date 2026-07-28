@@ -178,7 +178,7 @@ internal static class LauncherSelfTests
             Assert(!Directory.Exists(interruptedRoot), "Interrupted update staging cleanup", lines);
 
             Assert(PluginManifestSignatureVerifier.Verify(manifest, publishers).IsTrusted, "Signed manifest verification", lines);
-            Assert(manifest.SchemaVersion == 4 && manifest.RequiresLicenseAcceptance, "Plugin license metadata", lines);
+            Assert(manifest.SchemaVersion == 5 && manifest.RequiresLicenseAcceptance, "Plugin license metadata", lines);
             manifest.Description += " tampered";
             Assert(!PluginManifestSignatureVerifier.Verify(manifest, publishers).IsTrusted, "Manifest tamper detection", lines);
             manifest.Description = "Installer verification fixture";
@@ -228,6 +228,81 @@ internal static class LauncherSelfTests
             Assert(builtInCatalog.Models.Select(model => model.Port).Distinct().Count() == 3, "Built-in fixed port uniqueness", lines);
             Assert(builtInCatalog.Models.All(model => model.Runtime == "python" && model.RuntimeVersion == ">=3.10"), "Built-in structured Python requirements", lines);
             Assert(builtInCatalog.Models.All(model => model.PreservedPaths.Contains("checkpoints")), "Built-in preserved model directories", lines);
+
+            var downloadRoot = Path.Combine(testRoot, "download-resume");
+            var downloadDirectory = Path.Combine(downloadRoot, "downloads");
+            Directory.CreateDirectory(downloadDirectory);
+            var packageBytes = await File.ReadAllBytesAsync(packagePath);
+            var resumedManifest = CloneManifest(manifest);
+            resumedManifest.Id = "resumed-plugin";
+            resumedManifest.PackageMirrors = ["https://mirror.example.com/resumed-plugin.zip"];
+            var partialPath = Path.Combine(downloadDirectory, "resumed-plugin-1.0.0.zip.partial");
+            await File.WriteAllBytesAsync(partialPath, packageBytes[..(packageBytes.Length / 2)]);
+            using (var downloadClient = new HttpClient(new RetryingRangeHandler(packageBytes, failuresBeforeSuccess: 2)))
+            {
+                var downloadService = new PluginDownloadService(downloadClient);
+                var downloadedPath = await downloadService.DownloadAsync(resumedManifest, downloadRoot);
+                Assert((await File.ReadAllBytesAsync(downloadedPath)).SequenceEqual(packageBytes), "Resumable plugin download with retry", lines);
+                Assert(!File.Exists(partialPath), "Completed download finalization", lines);
+            }
+
+            var preflightPass = PluginInstallPreflightService.Assess(manifest, dataRoot, () => (0, 8192));
+            Assert(preflightPass.CanInstall, "Plugin disk and GPU preflight", lines);
+            var lowDiskManifest = CloneManifest(manifest);
+            lowDiskManifest.MinimumFreeDiskBytes = long.MaxValue;
+            Assert(!PluginInstallPreflightService.Assess(lowDiskManifest, dataRoot, () => null).CanInstall, "Insufficient disk blocking", lines);
+
+            using (var authorizedClient = new HttpClient(new AuthorizationHandler(System.Net.HttpStatusCode.PartialContent)))
+            {
+                var authorization = new ExternalModelAuthorizationService(authorizedClient);
+                var gatedManifest = CloneManifest(manifest);
+                gatedManifest.RequiresExternalAuthorization = true;
+                gatedManifest.ModelProvider = "huggingface";
+                gatedManifest.ModelId = "example/gated-model";
+                gatedManifest.AuthorizationUrl = "https://huggingface.co/example/gated-model";
+                gatedManifest.AuthorizationProbePath = "config.json";
+                Assert((await authorization.VerifyAsync(gatedManifest, "test-token")).IsAuthorized, "Hugging Face access verification", lines);
+                using var deniedClient = new HttpClient(new AuthorizationHandler(System.Net.HttpStatusCode.Forbidden));
+                var denied = await new ExternalModelAuthorizationService(deniedClient).VerifyAsync(gatedManifest, "test-token");
+                Assert(denied.Status == ExternalAuthorizationStatus.AccessNotGranted, "Gated model authorization classification", lines);
+            }
+
+            var cleanManifest = CloneManifest(manifest);
+            cleanManifest.Id = "clean-python-plugin";
+            cleanManifest.Executable = ".venv/Scripts/python.exe";
+            cleanManifest.Arguments = "--version";
+            cleanManifest.CreateVirtualEnvironment = true;
+            cleanManifest.VirtualEnvironmentPath = ".venv";
+            cleanManifest.RequirementsFile = string.Empty;
+            cleanManifest.Dependencies = ["python>=3.10", "file:model.dat"];
+            ResignManifest(cleanManifest, rsa);
+            var cleanDataRoot = Path.Combine(testRoot, "clean-install-data");
+            var cleanInstall = await packageService.InstallAsync(cleanManifest, packagePath, cleanDataRoot);
+            Assert(File.Exists(Path.Combine(cleanInstall.Definition.RootDirectory, ".venv", "Scripts", "python.exe")), "Automatic Python virtual environment creation", lines);
+            Assert(PluginDependencyChecker.Check(cleanInstall.Definition.Dependencies, cleanInstall.Definition.RootDirectory).All(result => result.IsSatisfied), "Clean directory plugin environment self-check", lines);
+
+            var preservedDownload = Path.Combine(dataRoot, "downloads", "preserved-package.zip");
+            Directory.CreateDirectory(Path.GetDirectoryName(preservedDownload)!);
+            File.Copy(packagePath, preservedDownload, true);
+            var failingManifest = CloneManifest(manifest);
+            failingManifest.Id = "failing-install";
+            failingManifest.RequiredFiles = ["missing.file"];
+            ResignManifest(failingManifest, rsa);
+            await AssertThrowsAsync<InvalidDataException>(() => packageService.InstallAsync(failingManifest, preservedDownload, dataRoot), "Failed plugin installation detection", lines);
+            Assert(File.Exists(preservedDownload), "Completed download preserved after install failure", lines);
+            Assert(!Directory.EnumerateDirectories(Path.Combine(dataRoot, "downloads"), "install-failing-install-*").Any(), "Failed installation staging cleanup", lines);
+
+            var credentialTarget = "BaChenAILauncher/SelfTest/" + Guid.NewGuid().ToString("N");
+            try
+            {
+                WindowsCredentialStore.Save(credentialTarget, "SelfTest", "temporary-secret");
+                Assert(WindowsCredentialStore.Read(credentialTarget) == "temporary-secret", "Windows Credential Manager token storage", lines);
+            }
+            finally
+            {
+                WindowsCredentialStore.Delete(credentialTarget);
+            }
+            Assert(WindowsCredentialStore.Read(credentialTarget) is null, "Windows Credential Manager token removal", lines);
 
             var assessment = ResourceScheduler.Assess(
                 install.Definition.ToServiceProfileForSelfTest(),
@@ -405,5 +480,42 @@ internal static class LauncherSelfTests
     {
         protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
             => Task.FromException<HttpResponseMessage>(exception);
+    }
+
+    private sealed class RetryingRangeHandler(byte[] content, int failuresBeforeSuccess) : HttpMessageHandler
+    {
+        private int _attempts;
+
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            _attempts++;
+            if (_attempts <= failuresBeforeSuccess)
+            {
+                throw new HttpRequestException("simulated transient download failure");
+            }
+            var start = request.Headers.Range?.Ranges.FirstOrDefault()?.From ?? 0;
+            if (start >= content.Length)
+            {
+                return Task.FromResult(new HttpResponseMessage(System.Net.HttpStatusCode.RequestedRangeNotSatisfiable));
+            }
+            var bytes = content[(int)start..];
+            var response = new HttpResponseMessage(start > 0 ? System.Net.HttpStatusCode.PartialContent : System.Net.HttpStatusCode.OK)
+            {
+                Content = new ByteArrayContent(bytes)
+            };
+            if (start > 0)
+            {
+                response.Content.Headers.ContentRange = new System.Net.Http.Headers.ContentRangeHeaderValue(start, content.Length - 1, content.Length);
+            }
+            return Task.FromResult(response);
+        }
+    }
+
+    private sealed class AuthorizationHandler(System.Net.HttpStatusCode probeStatus) : HttpMessageHandler
+    {
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+            => Task.FromResult(request.RequestUri?.AbsolutePath.Contains("whoami", StringComparison.OrdinalIgnoreCase) == true
+                ? new HttpResponseMessage(System.Net.HttpStatusCode.OK) { Content = new StringContent("{}") }
+                : new HttpResponseMessage(probeStatus) { Content = new ByteArrayContent([0]) });
     }
 }

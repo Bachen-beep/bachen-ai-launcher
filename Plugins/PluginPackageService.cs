@@ -7,9 +7,14 @@ namespace BaChenAiLauncher;
 
 internal sealed class PluginPackageService(HttpClient httpClient)
 {
-    public async Task<PluginInstallResult> InstallAsync(PluginPackageManifest manifest, string? localPackagePath, string dataRoot, CancellationToken cancellationToken = default)
+    public async Task<PluginInstallResult> InstallAsync(PluginPackageManifest manifest, string? localPackagePath, string dataRoot, IProgress<string>? setupProgress = null, CancellationToken cancellationToken = default)
     {
         ValidateManifest(manifest);
+        var preflight = PluginInstallPreflightService.Assess(manifest, dataRoot);
+        if (!preflight.CanInstall)
+        {
+            throw new IOException(string.Join(Environment.NewLine, preflight.Issues.Where(issue => issue.Severity == PluginPreflightSeverity.Blocking).Select(issue => issue.Message)));
+        }
         var pluginsRoot = Path.GetFullPath(Path.Combine(dataRoot, "plugins"));
         var downloadsRoot = Path.GetFullPath(Path.Combine(dataRoot, "downloads"));
         var backupsRoot = Path.GetFullPath(Path.Combine(dataRoot, "backups", "plugin-installs"));
@@ -19,18 +24,9 @@ internal sealed class PluginPackageService(HttpClient httpClient)
 
         var safeId = SanitizeId(manifest.Id);
         var packagePath = localPackagePath;
-        var downloadedPackage = false;
         if (string.IsNullOrWhiteSpace(packagePath))
         {
-            if (!Uri.TryCreate(manifest.PackageUrl, UriKind.Absolute, out var packageUri) || packageUri.Scheme != Uri.UriSchemeHttps)
-            {
-                throw new InvalidDataException("The manifest must provide an HTTPS packageUrl when no local ZIP is selected.");
-            }
-            packagePath = Path.Combine(downloadsRoot, $"{safeId}-{manifest.Version}-{Guid.NewGuid():N}.zip");
-            await using var source = await httpClient.GetStreamAsync(packageUri, cancellationToken);
-            await using var destination = File.Create(packagePath);
-            await source.CopyToAsync(destination, cancellationToken);
-            downloadedPackage = true;
+            packagePath = await new PluginDownloadService(httpClient).DownloadAsync(manifest, dataRoot, cancellationToken: cancellationToken);
         }
 
         packagePath = Path.GetFullPath(packagePath);
@@ -51,11 +47,13 @@ internal sealed class PluginPackageService(HttpClient httpClient)
         var stagingRoot = Path.Combine(downloadsRoot, $"install-{safeId}-{Guid.NewGuid():N}");
         var targetRoot = Path.Combine(pluginsRoot, safeId);
         string? backupPath = null;
+        var targetActivated = false;
         try
         {
             Directory.CreateDirectory(stagingRoot);
             ExtractSecurely(packagePath, stagingRoot);
             var contentRoot = ResolveContentRoot(stagingRoot);
+            await PythonEnvironmentService.EnsureAsync(manifest, contentRoot, setupProgress, cancellationToken);
             ValidateInstalledFiles(manifest, contentRoot);
 
             if (Directory.Exists(targetRoot))
@@ -64,6 +62,7 @@ internal sealed class PluginPackageService(HttpClient httpClient)
                 Directory.Move(targetRoot, backupPath);
             }
             Directory.Move(contentRoot, targetRoot);
+            targetActivated = true;
             File.WriteAllText(
                 Path.Combine(targetRoot, ".bachen-plugin-manifest.json"),
                 JsonSerializer.Serialize(manifest, new JsonSerializerOptions { WriteIndented = true, PropertyNamingPolicy = JsonNamingPolicy.CamelCase }),
@@ -104,7 +103,11 @@ internal sealed class PluginPackageService(HttpClient httpClient)
         }
         catch
         {
-            if (!Directory.Exists(targetRoot) && backupPath is not null && Directory.Exists(backupPath))
+            if (targetActivated && Directory.Exists(targetRoot))
+            {
+                Directory.Delete(targetRoot, true);
+            }
+            if (backupPath is not null && Directory.Exists(backupPath))
             {
                 Directory.Move(backupPath, targetRoot);
             }
@@ -115,10 +118,6 @@ internal sealed class PluginPackageService(HttpClient httpClient)
             if (Directory.Exists(stagingRoot))
             {
                 Directory.Delete(stagingRoot, true);
-            }
-            if (downloadedPackage && File.Exists(packagePath))
-            {
-                File.Delete(packagePath);
             }
         }
     }
@@ -140,7 +139,7 @@ internal sealed class PluginPackageService(HttpClient httpClient)
 
     private static void ValidateManifest(PluginPackageManifest manifest)
     {
-        if (manifest.SchemaVersion is not (2 or 3 or 4))
+        if (manifest.SchemaVersion is not (2 or 3 or 4 or 5))
         {
             throw new InvalidDataException($"Unsupported plugin manifest schema: {manifest.SchemaVersion}.");
         }
@@ -202,7 +201,43 @@ internal sealed class PluginPackageService(HttpClient httpClient)
                 }
             }
         }
+        if (manifest.SchemaVersion >= 5)
+        {
+            foreach (var mirror in manifest.PackageMirrors ?? [])
+            {
+                if (!Uri.TryCreate(mirror, UriKind.Absolute, out var mirrorUri) || mirrorUri.Scheme != Uri.UriSchemeHttps)
+                {
+                    throw new InvalidDataException("packageMirrors must contain only HTTPS URLs.");
+                }
+            }
+            if (manifest.CreateVirtualEnvironment &&
+                (!manifest.Runtime.Equals("python", StringComparison.OrdinalIgnoreCase) ||
+                 !IsSafeRelativePath(manifest.VirtualEnvironmentPath) ||
+                 (!string.IsNullOrWhiteSpace(manifest.RequirementsFile) && !IsSafeRelativePath(manifest.RequirementsFile))))
+            {
+                throw new InvalidDataException("Python virtual environment fields are invalid or unsafe.");
+            }
+            if (manifest.MinimumFreeDiskBytes < 0)
+            {
+                throw new InvalidDataException("minimumFreeDiskBytes cannot be negative.");
+            }
+            if (manifest.RequiresExternalAuthorization)
+            {
+                if (!manifest.ModelProvider.Equals("huggingface", StringComparison.OrdinalIgnoreCase) ||
+                    !System.Text.RegularExpressions.Regex.IsMatch(manifest.ModelId, "^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$") ||
+                    !Uri.TryCreate(manifest.AuthorizationUrl, UriKind.Absolute, out var authorizationUri) ||
+                    authorizationUri.Scheme != Uri.UriSchemeHttps ||
+                    !authorizationUri.Host.Equals("huggingface.co", StringComparison.OrdinalIgnoreCase) ||
+                    !IsSafeRelativePath(manifest.AuthorizationProbePath))
+                {
+                    throw new InvalidDataException("External model authorization metadata is incomplete or unsafe.");
+                }
+            }
+        }
     }
+
+    private static bool IsSafeRelativePath(string value)
+        => !string.IsNullOrWhiteSpace(value) && !Path.IsPathRooted(value) && !value.Contains("..", StringComparison.Ordinal);
 
     private static void ExtractSecurely(string packagePath, string stagingRoot)
     {

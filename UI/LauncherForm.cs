@@ -792,6 +792,8 @@ internal sealed class LauncherForm : Form
 
     private static readonly HttpClient GitHubClient = CreateGitHubClient();
     private readonly PluginPackageService _pluginPackageService = new(GitHubClient);
+    private readonly PluginDownloadService _pluginDownloadService = new(GitHubClient);
+    private readonly ExternalModelAuthorizationService _authorizationService = new(GitHubClient);
     private readonly GitHubUpdateService _sourceUpdateService = new(GitHubClient);
     private readonly LauncherSelfUpdateService _launcherUpdateService = new(GitHubClient);
     private readonly LauncherDiagnosticsService _diagnosticsService = new();
@@ -2168,6 +2170,7 @@ internal sealed class LauncherForm : Form
         menu.Items.Add(L("安装签名插件包", "Install signed plugin"), null, async (_, _) => await ShowInstallPluginWizardAsync());
         menu.Items.Add(L("卸载所选插件", "Uninstall selected plugin"), null, (_, _) => UninstallSelectedPlugin());
         menu.Items.Add(L("受信任发布者", "Trusted publishers"), null, (_, _) => ShowTrustedPublishersDialog());
+        menu.Items.Add(L("删除 Hugging Face 登录凭据", "Delete Hugging Face credential"), null, (_, _) => DeleteHuggingFaceCredential());
         menu.Items.Add(new ToolStripSeparator());
         menu.Items.Add(L("添加新模型", "Add new model"), null, (_, _) => ShowAddModelDialog());
         menu.Items.Add(L("运行环境自检", "Run environment check"), null, (_, _) => ShowEnvironmentReport());
@@ -2315,6 +2318,23 @@ internal sealed class LauncherForm : Form
         {
             return;
         }
+        if (!await EnsureExternalAuthorizationAsync(manifest))
+        {
+            return;
+        }
+
+        var preflight = PluginInstallPreflightService.Assess(manifest, _settings.DataRoot);
+        if (!preflight.CanInstall)
+        {
+            MessageBox.Show(string.Join(Environment.NewLine, preflight.Issues.Select(issue => issue.Message)), L("安装预检失败", "Installation preflight failed"), MessageBoxButtons.OK, MessageBoxIcon.Error);
+            return;
+        }
+        if (preflight.Issues.Count > 0 && MessageBox.Show(
+                string.Join(Environment.NewLine, preflight.Issues.Select(issue => issue.Message)) + Environment.NewLine + Environment.NewLine + L("仍然继续安装吗？", "Continue with installation?"),
+                L("安装预检警告", "Installation preflight warning"), MessageBoxButtons.YesNo, MessageBoxIcon.Warning) != DialogResult.Yes)
+        {
+            return;
+        }
 
         var existing = _modelCatalog.Models.FirstOrDefault(model => model.Id.Equals(manifest.Id, StringComparison.OrdinalIgnoreCase));
         var usedPorts = _modelCatalog.Models.Where(model => existing is null || !model.Id.Equals(existing.Id, StringComparison.OrdinalIgnoreCase)).Select(model => model.Port);
@@ -2343,6 +2363,16 @@ internal sealed class LauncherForm : Form
             }
         }
 
+        if (packagePath is null)
+        {
+            using var downloadDialog = new PluginDownloadDialog(_pluginDownloadService, manifest, _settings.DataRoot, _useEnglish);
+            if (downloadDialog.ShowDialog(this) != DialogResult.OK || string.IsNullOrWhiteSpace(downloadDialog.PackagePath))
+            {
+                return;
+            }
+            packagePath = downloadDialog.PackagePath;
+        }
+
         var summary = L(
             $"插件：{manifest.DisplayName}\n版本：{manifest.Version}\n发布者：{verification.Publisher?.DisplayName}\n分类：{manifest.Category}\n端口：{manifest.Port}\n包来源：{(packagePath ?? manifest.PackageUrl)}\n\n签名有效。是否安装？",
             $"Plugin: {manifest.DisplayName}\nVersion: {manifest.Version}\nPublisher: {verification.Publisher?.DisplayName}\nCategory: {manifest.Category}\nPort: {manifest.Port}\nPackage: {packagePath ?? manifest.PackageUrl}\n\nSignature is valid. Install now?");
@@ -2354,7 +2384,12 @@ internal sealed class LauncherForm : Form
         try
         {
             SetRuntimePhase("正在验证并安装插件", $"Installing {manifest.DisplayName}");
-            var result = await _pluginPackageService.InstallAsync(manifest, packagePath, _settings.DataRoot);
+            var setupProgress = new Progress<string>(message =>
+            {
+                SetRuntimePhase(message, message);
+                AppendLog(message);
+            });
+            var result = await _pluginPackageService.InstallAsync(manifest, packagePath, _settings.DataRoot, setupProgress);
             if (existing is not null && result.ReplacedPluginBackup is not null)
             {
                 File.WriteAllText(
@@ -2384,6 +2419,92 @@ internal sealed class LauncherForm : Form
             AppendLog(L("插件安装失败：", "Plugin installation failed: ") + ex.Message, null, true);
             MessageBox.Show(ex.Message, L("安装失败", "Installation failed"), MessageBoxButtons.OK, MessageBoxIcon.Error);
         }
+    }
+
+    private async Task<bool> EnsureExternalAuthorizationAsync(PluginPackageManifest manifest)
+    {
+        if (!manifest.RequiresExternalAuthorization)
+        {
+            return true;
+        }
+        var target = ExternalModelAuthorizationService.HuggingFaceCredentialTarget;
+        var savedToken = WindowsCredentialStore.Read(target) ?? string.Empty;
+        while (true)
+        {
+            using var dialog = new Form
+            {
+                Text = L("外部模型授权", "External model authorization"),
+                StartPosition = FormStartPosition.CenterParent,
+                FormBorderStyle = FormBorderStyle.FixedDialog,
+                ClientSize = new Size(720, 330),
+                MaximizeBox = false,
+                MinimizeBox = false,
+                ShowInTaskbar = false,
+                BackColor = Theme.Card,
+                Font = new Font("Microsoft YaHei UI", 10F)
+            };
+            var message = new Label
+            {
+                Text = L(
+                    $"{manifest.DisplayName} 使用需要 Hugging Face 账户授权的模型。请自行注册、登录并在官方页面接受条款；启动器不会替你提交授权。",
+                    $"{manifest.DisplayName} uses a model that requires Hugging Face account authorization. Register, sign in, and accept the upstream terms yourself; the launcher will not submit authorization for you."),
+                Location = new Point(26, 22),
+                Size = new Size(668, 78),
+                ForeColor = Theme.Ink
+            };
+            var open = new LinkLabel { Text = L("打开官方授权页面", "Open official authorization page"), Location = new Point(26, 104), Size = new Size(300, 28), LinkColor = Theme.MidTeal };
+            open.Click += (_, _) => Process.Start(new ProcessStartInfo(manifest.AuthorizationUrl) { UseShellExecute = true });
+            var tokenLabel = new Label { Text = L("只读访问令牌", "Read-only access token"), Location = new Point(26, 148), Size = new Size(150, 28), ForeColor = Theme.Ink };
+            var token = new TextBox { Location = new Point(180, 144), Size = new Size(514, 30), UseSystemPasswordChar = true, Text = savedToken };
+            var remember = new CheckBox { Text = L("保存到 Windows 凭据管理器", "Save in Windows Credential Manager"), Location = new Point(180, 188), Size = new Size(360, 30), Checked = !string.IsNullOrWhiteSpace(savedToken), BackColor = Theme.Card };
+            var remove = new Button { Text = L("删除已保存令牌", "Delete saved token"), Location = new Point(26, 252), Size = new Size(160, 40) };
+            remove.Click += (_, _) =>
+            {
+                WindowsCredentialStore.Delete(target);
+                savedToken = string.Empty;
+                token.Clear();
+                remember.Checked = false;
+            };
+            var cancel = new Button { Text = L("取消", "Cancel"), DialogResult = DialogResult.Cancel, Location = new Point(466, 252), Size = new Size(104, 40) };
+            var verify = new Button { Text = L("验证权限", "Verify access"), DialogResult = DialogResult.OK, Location = new Point(582, 252), Size = new Size(112, 40) };
+            dialog.Controls.AddRange([message, open, tokenLabel, token, remember, remove, cancel, verify]);
+            dialog.AcceptButton = verify;
+            dialog.CancelButton = cancel;
+            if (dialog.ShowDialog(this) != DialogResult.OK)
+            {
+                return false;
+            }
+            SetRuntimePhase("正在验证 Hugging Face 权限", "Verifying Hugging Face access");
+            var result = await _authorizationService.VerifyAsync(manifest, token.Text);
+            if (result.IsAuthorized)
+            {
+                if (remember.Checked)
+                {
+                    WindowsCredentialStore.Save(target, "HuggingFace", token.Text.Trim());
+                }
+                else
+                {
+                    WindowsCredentialStore.Delete(target);
+                }
+                AppendLog(L("Hugging Face 身份与模型访问权限验证通过。", "Hugging Face identity and model access verified."));
+                return true;
+            }
+            MessageBox.Show(result.Message, L("授权验证失败", "Authorization verification failed"), MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            savedToken = token.Text;
+        }
+    }
+
+    private void DeleteHuggingFaceCredential()
+    {
+        if (MessageBox.Show(
+                L("删除保存在 Windows 凭据管理器中的 Hugging Face 令牌？", "Delete the Hugging Face token stored in Windows Credential Manager?"),
+                L("删除登录凭据", "Delete credential"), MessageBoxButtons.YesNo, MessageBoxIcon.Question) != DialogResult.Yes)
+        {
+            return;
+        }
+        WindowsCredentialStore.Delete(ExternalModelAuthorizationService.HuggingFaceCredentialTarget);
+        AppendLog(L("已删除 Hugging Face 登录凭据。", "Hugging Face credential deleted."));
+        MessageBox.Show(L("登录凭据已删除。", "The credential was deleted."), L("删除完成", "Credential deleted"), MessageBoxButtons.OK, MessageBoxIcon.Information);
     }
 
     private bool ConfirmPluginLicenseAcceptance(PluginPackageManifest manifest)

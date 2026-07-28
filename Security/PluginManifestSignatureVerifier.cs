@@ -46,6 +46,49 @@ internal static class PluginManifestSignatureVerifier
 
     public static string CreateCanonicalPayload(PluginPackageManifest manifest)
     {
+        if (manifest.SchemaVersion >= 5)
+        {
+            var versionFivePayload = new
+            {
+                manifest.SchemaVersion,
+                manifest.Id,
+                manifest.DisplayName,
+                manifest.Version,
+                manifest.Publisher,
+                manifest.Category,
+                manifest.Description,
+                manifest.Executable,
+                manifest.Arguments,
+                manifest.Runtime,
+                manifest.RuntimeVersion,
+                manifest.Port,
+                manifest.RecommendedVramMiB,
+                manifest.RecommendedSystemMemoryMiB,
+                manifest.IsHighVram,
+                RequiredFiles = manifest.RequiredFiles ?? [],
+                Dependencies = manifest.Dependencies ?? [],
+                manifest.GitHubRepository,
+                manifest.GitHubBranch,
+                manifest.PackageUrl,
+                PackageMirrors = manifest.PackageMirrors ?? [],
+                PackageSha256 = manifest.PackageSha256.ToUpperInvariant(),
+                manifest.PackageSizeBytes,
+                PreservedPaths = manifest.PreservedPaths ?? [],
+                manifest.LicenseName,
+                manifest.LicenseUrl,
+                manifest.RequiresLicenseAcceptance,
+                manifest.CreateVirtualEnvironment,
+                manifest.VirtualEnvironmentPath,
+                manifest.RequirementsFile,
+                manifest.MinimumFreeDiskBytes,
+                manifest.RequiresExternalAuthorization,
+                manifest.ModelProvider,
+                manifest.ModelId,
+                manifest.AuthorizationUrl,
+                manifest.AuthorizationProbePath
+            };
+            return JsonSerializer.Serialize(versionFivePayload, CanonicalJsonOptions);
+        }
         if (manifest.SchemaVersion >= 4)
         {
             var versionFourPayload = new
