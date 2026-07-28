@@ -777,7 +777,9 @@ internal sealed record ServiceProfile(
     string Arguments,
     int Port,
     bool IsMedium = false,
-    string[]? RequiredFiles = null);
+    string[]? RequiredFiles = null,
+    int RecommendedVramMiB = 0,
+    int RecommendedSystemMemoryMiB = 4096);
 
 internal sealed record GitHubUpdateSource(
     string DisplayName,
@@ -880,6 +882,7 @@ internal sealed class LauncherModelDefinition
     public string Arguments { get; set; } = string.Empty;
     public int Port { get; set; }
     public int RecommendedVramMiB { get; set; } = 4096;
+    public int RecommendedSystemMemoryMiB { get; set; } = 8192;
     public string[] RequiredFiles { get; set; } = [];
     public string GitHubRepository { get; set; } = string.Empty;
     public string GitHubBranch { get; set; } = "main";
@@ -1021,7 +1024,9 @@ internal sealed class LauncherForm : Form
             Path.Combine(_settings.WooshRoot, ".venv", "Scripts", "python.exe"),
             $"gradio_Woosh-DFlow.py --server-name 127.0.0.1 --server-port {_settings.WooshPort}",
             _settings.WooshPort,
-            RequiredFiles: ["gradio_Woosh-DFlow.py", "checkpoints"]);
+            RequiredFiles: ["gradio_Woosh-DFlow.py", "checkpoints"],
+            RecommendedVramMiB: 6800,
+            RecommendedSystemMemoryMiB: 16384);
 
         _smallSfx = CreateStableProfile("Stable Audio 3 · small-sfx", "Stable Audio 3 短音效生成", "small-sfx");
         _smallMusic = CreateStableProfile("Stable Audio 3 · small-music", "Stable Audio 3 音乐生成", "small-music");
@@ -1034,7 +1039,9 @@ internal sealed class LauncherForm : Form
             WindowsPowerShellPath,
             $"-NoProfile -ExecutionPolicy Bypass -File \"{Path.Combine(_settings.IndexTtsRoot, "tools", "windows_launcher.ps1")}\" -PreferredPort {_settings.IndexTtsPort}",
             _settings.IndexTtsPort,
-            RequiredFiles: ["tools/windows_launcher.ps1", "webui.py", "checkpoints"]);
+            RequiredFiles: ["tools/windows_launcher.ps1", "webui.py", "checkpoints"],
+            RecommendedVramMiB: 7500,
+            RecommendedSystemMemoryMiB: 16384);
     }
 
     private IEnumerable<LauncherModelDefinition> CustomModelDefinitions()
@@ -1056,7 +1063,9 @@ internal sealed class LauncherForm : Form
             ExpandModelValue(definition.Arguments, root, definition.Port),
             definition.Port,
             definition.IsHighVram,
-            definition.RequiredFiles ?? []);
+            definition.RequiredFiles ?? [],
+            definition.RecommendedVramMiB,
+            definition.RecommendedSystemMemoryMiB);
     }
 
     private static string ExpandModelValue(string value, string root, int port)
@@ -1131,7 +1140,9 @@ internal sealed class LauncherForm : Form
             $"run_gradio.py --model {model} --port {_settings.StablePort}",
             _settings.StablePort,
             isMedium,
-            ["run_gradio.py", "stable_audio_3"]);
+            ["run_gradio.py", "stable_audio_3"],
+            isMedium ? 8800 : 2200,
+            isMedium ? 16384 : 8192);
     }
 
     private static void MigrateLegacyConfiguration()
@@ -1389,9 +1400,9 @@ internal sealed class LauncherForm : Form
         {
             Models =
             [
-                new LauncherModelDefinition { Id = "woosh-dflow", DisplayName = "Woosh-DFlow", Description = "Text to sound effects and ambience", Category = "Sound design", RootDirectory = _settings.WooshRoot, Port = _settings.WooshPort, RecommendedVramMiB = 6800, RequiredFiles = ["gradio_Woosh-DFlow.py", "checkpoints"], GitHubRepository = "SonyResearch/Woosh", IsBuiltIn = true },
-                new LauncherModelDefinition { Id = "stable-audio-3", DisplayName = "Stable Audio 3", Description = "Sound effects, music, and medium generation", Category = "Audio generation", RootDirectory = _settings.StableRoot, Port = _settings.StablePort, RecommendedVramMiB = 2200, RequiredFiles = ["run_gradio.py", "stable_audio_3"], GitHubRepository = "Stability-AI/stable-audio-3", IsBuiltIn = true },
-                new LauncherModelDefinition { Id = "indextts2", DisplayName = "IndexTTS2", Description = "Character voice and emotional speech", Category = "Character voice", RootDirectory = _settings.IndexTtsRoot, Port = _settings.IndexTtsPort, RecommendedVramMiB = 7500, RequiredFiles = ["tools/windows_launcher.ps1", "webui.py", "checkpoints"], GitHubRepository = "index-tts/index-tts", IsBuiltIn = true }
+                new LauncherModelDefinition { Id = "woosh-dflow", DisplayName = "Woosh-DFlow", Description = "Text to sound effects and ambience", Category = "Sound design", RootDirectory = _settings.WooshRoot, Port = _settings.WooshPort, RecommendedVramMiB = 6800, RecommendedSystemMemoryMiB = 16384, RequiredFiles = ["gradio_Woosh-DFlow.py", "checkpoints"], GitHubRepository = "SonyResearch/Woosh", IsBuiltIn = true },
+                new LauncherModelDefinition { Id = "stable-audio-3", DisplayName = "Stable Audio 3", Description = "Sound effects, music, and medium generation", Category = "Audio generation", RootDirectory = _settings.StableRoot, Port = _settings.StablePort, RecommendedVramMiB = 2200, RecommendedSystemMemoryMiB = 8192, RequiredFiles = ["run_gradio.py", "stable_audio_3"], GitHubRepository = "Stability-AI/stable-audio-3", IsBuiltIn = true },
+                new LauncherModelDefinition { Id = "indextts2", DisplayName = "IndexTTS2", Description = "Character voice and emotional speech", Category = "Character voice", RootDirectory = _settings.IndexTtsRoot, Port = _settings.IndexTtsPort, RecommendedVramMiB = 7500, RecommendedSystemMemoryMiB = 16384, RequiredFiles = ["tools/windows_launcher.ps1", "webui.py", "checkpoints"], GitHubRepository = "index-tts/index-tts", IsBuiltIn = true }
             ]
         };
     }
@@ -1419,6 +1430,7 @@ internal sealed class LauncherForm : Form
             existing.RootDirectory = definition.RootDirectory;
             existing.Port = definition.Port;
             existing.RecommendedVramMiB = definition.RecommendedVramMiB;
+            existing.RecommendedSystemMemoryMiB = definition.RecommendedSystemMemoryMiB;
             existing.RequiredFiles = definition.RequiredFiles;
             existing.GitHubRepository = definition.GitHubRepository;
             existing.IsBuiltIn = true;
@@ -1861,10 +1873,13 @@ internal sealed class LauncherForm : Form
             lines.Add(string.Empty);
         }
 
-        var gpu = GetGpuMemoryUsage();
-        lines.Add(gpu is null
+        var resources = SystemResourceProbe.Capture();
+        lines.Add(resources.GpuTotalMiB is null || resources.GpuUsedMiB is null
             ? L("GPU：无法读取 nvidia-smi", "GPU: nvidia-smi unavailable")
-            : L($"GPU 显存：{gpu.Value.UsedMiB} / {gpu.Value.TotalMiB} MiB", $"GPU memory: {gpu.Value.UsedMiB} / {gpu.Value.TotalMiB} MiB"));
+            : L($"GPU 显存：{resources.GpuUsedMiB} / {resources.GpuTotalMiB} MiB", $"GPU memory: {resources.GpuUsedMiB} / {resources.GpuTotalMiB} MiB"));
+        lines.Add(L(
+            $"系统内存：{resources.AvailableMemoryMiB:N0} / {resources.TotalMemoryMiB:N0} MiB 可用",
+            $"System memory: {resources.AvailableMemoryMiB:N0} / {resources.TotalMemoryMiB:N0} MiB available"));
         lines.Add(string.Empty);
         lines.Add(L($"启动器版本：{LauncherVersion}", $"Launcher version: {LauncherVersion}"));
         lines.Add(L($"程序目录：{LauncherPaths.BaseDirectory}", $"Application directory: {LauncherPaths.BaseDirectory}"));
@@ -3424,55 +3439,45 @@ internal sealed class LauncherForm : Form
             return;
         }
 
-        if (profile.IsMedium && MessageBox.Show(
-                L($"{profile.Name} 被标记为高显存模型。当前设备约有 8 GB 显存，启动可能失败或导致系统卡顿。\n\n仍要尝试启动吗？", $"{profile.Name} is marked as a high-VRAM model. This computer has about 8 GB of VRAM, so startup may fail or make the system unresponsive.\n\nLaunch anyway?"),
-                L("高显存风险", "High VRAM risk"), MessageBoxButtons.YesNo, MessageBoxIcon.Warning) != DialogResult.Yes)
-        {
-            SetServiceRuntimeState(profile, ServiceRuntimeState.Ready);
-            return;
-        }
-
         var knownPids = GetKnownServicePids();
-        if (knownPids.Count > 0)
-        {
-            SetRuntimePhase("正在切换已运行服务", $"Stopping conflicting AI process(es): {string.Join(", ", knownPids)}");
-            var answer = MessageBox.Show(
-                "检测到已有已部署的 AI 服务正在运行。为避免端口和显存冲突，将先停止它们再启动所选模型。\n\n是否继续？",
-                "需要切换服务", MessageBoxButtons.YesNo, MessageBoxIcon.Warning);
-            if (answer != DialogResult.Yes)
-            {
-                SetServiceRuntimeState(profile, ServiceRuntimeState.Ready);
-                return;
-            }
-
-            StopProcesses(knownPids);
-            await Task.Delay(700);
-        }
-
         var occupied = GetListeningPids(profile.Port);
-        if (occupied.Count > 0)
+        var assessment = ResourceScheduler.Assess(profile, knownPids, occupied);
+        if (assessment.Conflicts.Count > 0)
         {
-            SetServiceRuntimeState(profile, ServiceRuntimeState.Error);
-            SetRuntimePhase("端口被未知程序占用", $"Port {profile.Port} is occupied");
-            ShowActionableError(
-                L("端口被占用", "Port is occupied"),
-                L($"端口 {profile.Port} 仍被其他程序占用（PID: {string.Join(", ", occupied)}）。\n启动器不会结束未知程序。请先关闭该程序后再试。", $"Port {profile.Port} is still occupied (PID: {string.Join(", ", occupied)}). The launcher will not terminate unknown processes."),
-                profile);
-            RefreshStatus();
-            return;
-        }
-
-        var gpu = GetGpuMemoryUsage();
-        if (gpu is not null && gpu.Value.UsedMiB > 1024 && knownPids.Count == 0)
-        {
-            var answer = MessageBox.Show(
-                L($"检测到 GPU 当前已使用 {gpu.Value.UsedMiB} / {gpu.Value.TotalMiB} MiB 显存，但没有识别到本启动器管理的 AI 进程。继续可能导致模型加载失败。\n\n仍要启动吗？", $"GPU is already using {gpu.Value.UsedMiB} / {gpu.Value.TotalMiB} MiB, but no launcher-managed AI process was found. Continuing may cause model loading to fail.\n\nLaunch anyway?"),
-                L("显存占用警告", "GPU memory warning"), MessageBoxButtons.YesNo, MessageBoxIcon.Warning);
-            if (answer != DialogResult.Yes)
+            var lines = assessment.Conflicts.Select(conflict =>
+                $"{(conflict.Severity == ResourceConflictSeverity.Blocking ? "[BLOCK]" : "[WARN]")} {conflict.Message}");
+            var resourceLine = L(
+                $"系统内存：{assessment.Snapshot.AvailableMemoryMiB:N0} / {assessment.Snapshot.TotalMemoryMiB:N0} MiB 可用",
+                $"System memory: {assessment.Snapshot.AvailableMemoryMiB:N0} / {assessment.Snapshot.TotalMemoryMiB:N0} MiB available");
+            var message = string.Join(Environment.NewLine, lines) + Environment.NewLine + resourceLine;
+            if (assessment.Snapshot.GpuTotalMiB is not null && assessment.Snapshot.GpuUsedMiB is not null)
+            {
+                message += Environment.NewLine + L(
+                    $"GPU 显存：{assessment.Snapshot.GpuUsedMiB:N0} / {assessment.Snapshot.GpuTotalMiB:N0} MiB 已使用",
+                    $"GPU memory: {assessment.Snapshot.GpuUsedMiB:N0} / {assessment.Snapshot.GpuTotalMiB:N0} MiB used");
+            }
+            AppendLog(L("启动资源评估：", "Launch resource assessment: ") + message.Replace(Environment.NewLine, " | "), profile, assessment.BlocksLaunch);
+            if (assessment.BlocksLaunch)
+            {
+                SetServiceRuntimeState(profile, ServiceRuntimeState.Error);
+                SetRuntimePhase("资源或端口冲突阻止启动", $"Resource conflict blocked {profile.Name}");
+                ShowActionableError(L("无法安全启动", "Launch blocked"), message, profile);
+                return;
+            }
+            if (assessment.RequiresConfirmation && MessageBox.Show(
+                    message + Environment.NewLine + Environment.NewLine + L("启动器将先停止已管理的冲突进程。仍要继续吗？", "Managed conflicting processes will be stopped first. Continue?"),
+                    L("启动资源评估", "Launch resource assessment"), MessageBoxButtons.YesNo, MessageBoxIcon.Warning) != DialogResult.Yes)
             {
                 SetServiceRuntimeState(profile, ServiceRuntimeState.Ready);
                 return;
             }
+        }
+
+        if (assessment.ManagedProcessIds.Count > 0)
+        {
+            SetRuntimePhase("正在释放 AI 资源", $"Stopping conflicting AI process(es): {string.Join(", ", assessment.ManagedProcessIds)}");
+            StopProcesses(assessment.ManagedProcessIds);
+            await Task.Delay(700);
         }
 
         try
@@ -3818,36 +3823,7 @@ Get-CimInstance Win32_Process | Where-Object {{
     }
 
     private static (int UsedMiB, int TotalMiB)? GetGpuMemoryUsage()
-    {
-        try
-        {
-            var startInfo = new ProcessStartInfo("nvidia-smi.exe", "--query-gpu=memory.used,memory.total --format=csv,noheader,nounits")
-            {
-                UseShellExecute = false,
-                CreateNoWindow = true,
-                RedirectStandardOutput = true,
-                RedirectStandardError = true
-            };
-            using var process = Process.Start(startInfo);
-            if (process is null || !process.WaitForExit(3000) || process.ExitCode != 0)
-            {
-                return null;
-            }
-            var line = process.StandardOutput.ReadToEnd().Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries).FirstOrDefault();
-            if (line is null)
-            {
-                return null;
-            }
-            var parts = line.Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries);
-            return parts.Length >= 2 && int.TryParse(parts[0], out var used) && int.TryParse(parts[1], out var total)
-                ? (used, total)
-                : null;
-        }
-        catch
-        {
-            return null;
-        }
-    }
+        => SystemResourceProbe.ReadGpuMemory();
 
     private void AppendLog(string message, ServiceProfile? service = null, bool isError = false)
     {
