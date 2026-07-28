@@ -36,7 +36,7 @@ jobs:
           $isPrerelease = -not [string]::IsNullOrEmpty($Matches.suffix)
           $releaseNotes = "Docs/ReleaseNotes-$($Matches.version)$($Matches.suffix).md"
           if (-not (Test-Path $releaseNotes)) {
-            throw "Release notes are required for $tag: $releaseNotes"
+            throw ("Release notes are required for {0}: {1}" -f $tag, $releaseNotes)
           }
           "version=$($Matches.version)" >> $env:GITHUB_OUTPUT
           "prerelease=$($isPrerelease.ToString().ToLowerInvariant())" >> $env:GITHUB_OUTPUT
