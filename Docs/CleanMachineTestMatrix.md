@@ -12,6 +12,17 @@
 | Signed update manifest generation and tamper rejection | Pass | RSA signature and mutation self-tests |
 | Diagnostic secret redaction | Pass | Token fixture absent from exported report |
 
+## Stage Two closeout verification on 2026-07-28
+
+| Scenario | Result | Evidence |
+| --- | --- | --- |
+| Published `0.12.2` standalone EXE | Pass | 18 self-tests; SHA-256 `5E4A253EAE3A1FE007FA9159DF442EB229F0A05D0DF13F432DCD229D0F8FE1D3` |
+| Published `0.12.2` installer | Pass | Silent per-user install to an isolated path containing Chinese characters and spaces |
+| Isolated UI startup | Pass | Separate config and data environment overrides; launcher remained running without starting an AI model |
+| Installed EXE self-test | Pass | All 18 self-tests completed from the isolated installation |
+| Silent uninstall and preservation | Pass | Program removed; explicit marker in isolated configuration directory preserved |
+| Post-publication provenance | Pass | Workflow re-downloaded assets, verified SHA-256, and verified both GitHub Artifact Attestations |
+
 ## Required before production
 
 | Environment or scenario | Status | Acceptance |
