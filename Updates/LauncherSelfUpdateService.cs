@@ -10,6 +10,12 @@ internal sealed record LauncherUpdateCheck(LauncherUpdateManifest Manifest, Vers
     public bool IsUpdateAvailable => LatestVersion > CurrentVersion;
 }
 
+internal sealed class LauncherUpdateUnavailableException(LauncherUpdateChannel channel, Exception? innerException = null)
+    : InvalidOperationException($"No {channel.ToString().ToLowerInvariant()} launcher release is currently available.", innerException)
+{
+    public LauncherUpdateChannel Channel { get; } = channel;
+}
+
 internal sealed class LauncherSelfUpdateService(HttpClient client)
 {
     public static readonly Uri DefaultManifestUri = new("https://github.com/Bachen-beep/bachen-ai-launcher/releases/latest/download/launcher-update.json");
@@ -18,7 +24,18 @@ internal sealed class LauncherSelfUpdateService(HttpClient client)
     public async Task<LauncherUpdateCheck> CheckAsync(LauncherUpdateChannel channel = LauncherUpdateChannel.Stable, Uri? manifestUri = null)
     {
         var resolvedManifestUri = manifestUri ?? await ResolveManifestUriAsync(channel);
-        var json = await client.GetStringAsync(resolvedManifestUri);
+        string json;
+        try
+        {
+            json = await client.GetStringAsync(resolvedManifestUri);
+        }
+        catch (HttpRequestException ex) when (
+            manifestUri is null &&
+            channel == LauncherUpdateChannel.Stable &&
+            ex.StatusCode == System.Net.HttpStatusCode.NotFound)
+        {
+            throw new LauncherUpdateUnavailableException(channel, ex);
+        }
         var manifest = JsonSerializer.Deserialize<LauncherUpdateManifest>(json, new JsonSerializerOptions { PropertyNameCaseInsensitive = true })
             ?? throw new InvalidDataException("The launcher update manifest is empty.");
         LauncherUpdateManifestVerifier.Validate(manifest, ReadEmbeddedPublicKey());
@@ -60,7 +77,7 @@ internal sealed class LauncherSelfUpdateService(HttpClient client)
                 }
             }
         }
-        throw new InvalidOperationException("No preview launcher release with an update manifest is available.");
+        throw new LauncherUpdateUnavailableException(LauncherUpdateChannel.Preview);
     }
 
     public Task<string> DownloadVerifiedAsync(LauncherUpdateManifest manifest)

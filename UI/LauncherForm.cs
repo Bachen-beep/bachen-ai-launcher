@@ -1485,6 +1485,12 @@ internal sealed class LauncherForm : Form
 
     private string DescribeLauncherUpdateError(Exception exception)
     {
+        if (exception is LauncherUpdateUnavailableException unavailable)
+        {
+            return unavailable.Channel == LauncherUpdateChannel.Stable
+                ? L("目前没有可用的稳定版。你可以继续使用当前版本，或在设置中切换到预览版通道。", "No stable release is currently available. Keep using this version or switch to the Preview channel in Settings.")
+                : L("目前没有可用的预览版，请稍后重试。", "No preview release is currently available. Try again later.");
+        }
         if (exception is TaskCanceledException) return L("网络请求超时，请稍后重试。", "The network request timed out. Try again later.");
         if (exception is HttpRequestException) return L("无法连接 GitHub 更新服务，请检查网络或代理设置。", "GitHub update services could not be reached. Check the network or proxy.");
         if (exception is IOException && exception.Message.Contains("disk space", StringComparison.OrdinalIgnoreCase)) return L("磁盘空间不足，无法安全下载更新。", "There is not enough disk space to download the update safely.");

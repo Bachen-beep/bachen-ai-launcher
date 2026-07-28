@@ -107,6 +107,33 @@ internal static class LauncherSelfTests
             var previewManifestUri = await updateService.ResolveManifestUriAsync(LauncherUpdateChannel.Preview);
             Assert(previewManifestUri.AbsoluteUri.Contains("stage2-preview/launcher-update.json", StringComparison.Ordinal), "Preview update channel resolution", lines);
 
+            using (var noStableClient = new HttpClient(new StatusCodeHandler(System.Net.HttpStatusCode.NotFound)))
+            {
+                var noStableService = new LauncherSelfUpdateService(noStableClient);
+                var unavailable = await AssertThrowsAsync<LauncherUpdateUnavailableException>(
+                    () => noStableService.CheckAsync(LauncherUpdateChannel.Stable),
+                    "Missing stable release classification",
+                    lines);
+                Assert(unavailable.Channel == LauncherUpdateChannel.Stable, "Missing stable release channel", lines);
+            }
+            using (var noPreviewClient = new HttpClient(new StaticJsonHandler("[]")))
+            {
+                var noPreviewService = new LauncherSelfUpdateService(noPreviewClient);
+                var unavailable = await AssertThrowsAsync<LauncherUpdateUnavailableException>(
+                    () => noPreviewService.ResolveManifestUriAsync(LauncherUpdateChannel.Preview),
+                    "Missing preview release classification",
+                    lines);
+                Assert(unavailable.Channel == LauncherUpdateChannel.Preview, "Missing preview release channel", lines);
+            }
+            using (var serverFailureClient = new HttpClient(new StatusCodeHandler(System.Net.HttpStatusCode.InternalServerError)))
+            {
+                var serverFailureService = new LauncherSelfUpdateService(serverFailureClient);
+                await AssertThrowsAsync<HttpRequestException>(
+                    () => serverFailureService.CheckAsync(LauncherUpdateChannel.Stable),
+                    "GitHub server failure remains a network error",
+                    lines);
+            }
+
             var offlineDataPath = Path.Combine(testRoot, "offline-existing-plugin.dat");
             await File.WriteAllTextAsync(offlineDataPath, "preserve", Encoding.ASCII);
             using (var offlineClient = new HttpClient(new FailureHandler(new HttpRequestException("simulated offline network"))))
@@ -282,6 +309,25 @@ internal static class LauncherSelfTests
         throw new InvalidOperationException($"Self-test assertion failed: {name}");
     }
 
+    private static async Task<TException> AssertThrowsAsync<TException>(Func<Task> action, string name, ICollection<string> lines)
+        where TException : Exception
+    {
+        try
+        {
+            await action();
+        }
+        catch (TException ex)
+        {
+            lines.Add("PASS: " + name);
+            return ex;
+        }
+        catch (Exception ex)
+        {
+            throw new InvalidOperationException($"Self-test assertion failed: {name}; expected {typeof(TException).Name}, received {ex.GetType().Name}.", ex);
+        }
+        throw new InvalidOperationException($"Self-test assertion failed: {name}");
+    }
+
     private static async Task WriteReportAsync(string reportPath, IEnumerable<string> lines)
     {
         var fullPath = Path.GetFullPath(reportPath);
@@ -296,6 +342,12 @@ internal static class LauncherSelfTests
             {
                 Content = new StringContent(json, Encoding.UTF8, "application/json")
             });
+    }
+
+    private sealed class StatusCodeHandler(System.Net.HttpStatusCode statusCode) : HttpMessageHandler
+    {
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+            => Task.FromResult(new HttpResponseMessage(statusCode));
     }
 
     private sealed class FailureHandler(Exception exception) : HttpMessageHandler
