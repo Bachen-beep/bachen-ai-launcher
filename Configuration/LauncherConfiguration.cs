@@ -62,7 +62,7 @@ internal enum LauncherUpdateChannel
 
 internal sealed class LauncherModelCatalog
 {
-    public int SchemaVersion { get; set; } = 2;
+    public int SchemaVersion { get; set; } = 3;
     public List<LauncherModelDefinition> Models { get; set; } = [];
 }
 
@@ -75,6 +75,8 @@ internal sealed class LauncherModelDefinition
     public string RootDirectory { get; set; } = string.Empty;
     public string Executable { get; set; } = string.Empty;
     public string Arguments { get; set; } = string.Empty;
+    public string Runtime { get; set; } = string.Empty;
+    public string RuntimeVersion { get; set; } = string.Empty;
     public int Port { get; set; }
     public int RecommendedVramMiB { get; set; } = 4096;
     public int RecommendedSystemMemoryMiB { get; set; } = 8192;
@@ -86,6 +88,8 @@ internal sealed class LauncherModelDefinition
     public string Publisher { get; set; } = string.Empty;
     public string SigningKeyId { get; set; } = string.Empty;
     public string PackageSha256 { get; set; } = string.Empty;
+    public long PackageSizeBytes { get; set; }
+    public string[] PreservedPaths { get; set; } = [];
     public bool IsManifestTrusted { get; set; }
     public string TrustSource { get; set; } = "LocalUser";
     public bool IsBuiltIn { get; set; }

@@ -38,6 +38,10 @@ internal sealed class PluginPackageService(HttpClient httpClient)
         {
             throw new FileNotFoundException("Plugin package ZIP was not found.", packagePath);
         }
+        if (manifest.PackageSizeBytes > 0 && new FileInfo(packagePath).Length != manifest.PackageSizeBytes)
+        {
+            throw new InvalidDataException($"Package size mismatch. Expected {manifest.PackageSizeBytes} bytes; actual {new FileInfo(packagePath).Length} bytes.");
+        }
         var packageHash = await ComputeSha256Async(packagePath, cancellationToken);
         if (!packageHash.Equals(manifest.PackageSha256, StringComparison.OrdinalIgnoreCase))
         {
@@ -78,6 +82,8 @@ internal sealed class PluginPackageService(HttpClient httpClient)
                 RootDirectory = targetRoot,
                 Executable = manifest.Executable.Trim(),
                 Arguments = manifest.Arguments,
+                Runtime = manifest.Runtime.Trim(),
+                RuntimeVersion = manifest.RuntimeVersion.Trim(),
                 Port = manifest.Port,
                 RecommendedVramMiB = manifest.RecommendedVramMiB,
                 RecommendedSystemMemoryMiB = manifest.RecommendedSystemMemoryMiB,
@@ -89,6 +95,8 @@ internal sealed class PluginPackageService(HttpClient httpClient)
                 Publisher = manifest.Publisher.Trim(),
                 SigningKeyId = manifest.Signature.KeyId.Trim(),
                 PackageSha256 = packageHash,
+                PackageSizeBytes = new FileInfo(packagePath).Length,
+                PreservedPaths = manifest.PreservedPaths ?? [],
                 IsManifestTrusted = true,
                 TrustSource = "SignedManifest",
                 IsHighVram = manifest.IsHighVram
@@ -132,7 +140,7 @@ internal sealed class PluginPackageService(HttpClient httpClient)
 
     private static void ValidateManifest(PluginPackageManifest manifest)
     {
-        if (manifest.SchemaVersion is not (2 or 3))
+        if (manifest.SchemaVersion is not (2 or 3 or 4))
         {
             throw new InvalidDataException($"Unsupported plugin manifest schema: {manifest.SchemaVersion}.");
         }
@@ -163,6 +171,36 @@ internal sealed class PluginPackageService(HttpClient httpClient)
              !manifest.RequiresLicenseAcceptance))
         {
             throw new InvalidDataException("Schema v3 plugins must provide a license name, an HTTPS license URL, and require explicit acceptance.");
+        }
+        if (manifest.SchemaVersion >= 4)
+        {
+            if (!System.Text.RegularExpressions.Regex.IsMatch(manifest.Version, "^\\d+\\.\\d+\\.\\d+(?:-[0-9A-Za-z.-]+)?(?:\\+[0-9A-Za-z.-]+)?$"))
+            {
+                throw new InvalidDataException("Schema v4 plugin version must use SemVer (for example 1.2.3 or 1.2.3-preview.1).");
+            }
+            if (string.IsNullOrWhiteSpace(manifest.Runtime) || string.IsNullOrWhiteSpace(manifest.RuntimeVersion))
+            {
+                throw new InvalidDataException("Schema v4 plugins must provide runtime and runtimeVersion.");
+            }
+            if (manifest.PackageSizeBytes <= 0)
+            {
+                throw new InvalidDataException("Schema v4 plugins must provide a positive packageSizeBytes value.");
+            }
+            if (!Uri.TryCreate(manifest.PackageUrl, UriKind.Absolute, out var packageUri) || packageUri.Scheme != Uri.UriSchemeHttps)
+            {
+                throw new InvalidDataException("Schema v4 plugins must provide an HTTPS packageUrl.");
+            }
+            if (!System.Text.RegularExpressions.Regex.IsMatch(manifest.GitHubRepository, "^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$"))
+            {
+                throw new InvalidDataException("Schema v4 gitHubRepository must use owner/repository format.");
+            }
+            foreach (var path in manifest.PreservedPaths ?? [])
+            {
+                if (string.IsNullOrWhiteSpace(path) || Path.IsPathRooted(path) || path.Contains("..", StringComparison.Ordinal))
+                {
+                    throw new InvalidDataException("preservedPaths must contain safe paths relative to the plugin directory.");
+                }
+            }
         }
     }
 
@@ -252,6 +290,13 @@ internal static class InstalledPluginTrustValidator
                 definition.Arguments.Equals(manifest.Arguments, StringComparison.Ordinal) &&
                 definition.Port == manifest.Port &&
                 definition.PackageSha256.Equals(manifest.PackageSha256, StringComparison.OrdinalIgnoreCase);
+            if (matchesCatalog && manifest.SchemaVersion >= 4)
+            {
+                matchesCatalog = definition.Runtime.Equals(manifest.Runtime, StringComparison.OrdinalIgnoreCase) &&
+                    definition.RuntimeVersion.Equals(manifest.RuntimeVersion, StringComparison.Ordinal) &&
+                    definition.PackageSizeBytes == manifest.PackageSizeBytes &&
+                    definition.PreservedPaths.SequenceEqual(manifest.PreservedPaths ?? [], StringComparer.OrdinalIgnoreCase);
+            }
             return matchesCatalog
                 ? signature
                 : new ManifestVerificationResult(false, "The executable, arguments, port, or package hash differs from the signed manifest.", signature.Publisher);

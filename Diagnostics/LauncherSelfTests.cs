@@ -53,10 +53,16 @@ internal static class LauncherSelfTests
                 Description = "Installer verification fixture",
                 Executable = "start.cmd",
                 Arguments = "--port {port}",
+                Runtime = "python",
+                RuntimeVersion = ">=3.10",
                 Port = 17862,
                 RequiredFiles = ["model.dat"],
                 Dependencies = ["file:model.dat"],
+                GitHubRepository = "example/self-test-plugin",
+                PackageUrl = "https://example.com/self-test-plugin.zip",
                 PackageSha256 = packageHash,
+                PackageSizeBytes = new FileInfo(packagePath).Length,
+                PreservedPaths = ["models", "outputs"],
                 LicenseName = "Self Test License",
                 LicenseUrl = "https://example.com/self-test-license",
                 RequiresLicenseAcceptance = true,
@@ -172,7 +178,7 @@ internal static class LauncherSelfTests
             Assert(!Directory.Exists(interruptedRoot), "Interrupted update staging cleanup", lines);
 
             Assert(PluginManifestSignatureVerifier.Verify(manifest, publishers).IsTrusted, "Signed manifest verification", lines);
-            Assert(manifest.SchemaVersion == 3 && manifest.RequiresLicenseAcceptance, "Plugin license metadata", lines);
+            Assert(manifest.SchemaVersion == 4 && manifest.RequiresLicenseAcceptance, "Plugin license metadata", lines);
             manifest.Description += " tampered";
             Assert(!PluginManifestSignatureVerifier.Verify(manifest, publishers).IsTrusted, "Manifest tamper detection", lines);
             manifest.Description = "Installer verification fixture";
@@ -183,10 +189,45 @@ internal static class LauncherSelfTests
             var install = await packageService.InstallAsync(manifest, packagePath, dataRoot);
             Assert(File.Exists(Path.Combine(install.Definition.RootDirectory, "start.cmd")), "Secure ZIP installation", lines);
             Assert(install.Definition.InstalledVersion == "1.0.0" && install.Definition.Dependencies.SequenceEqual(["file:model.dat"]), "Version and dependency metadata", lines);
+            Assert(install.Definition.Runtime == "python" && install.Definition.RuntimeVersion == ">=3.10", "Structured runtime metadata", lines);
+            Assert(install.Definition.PackageSizeBytes == new FileInfo(packagePath).Length, "Package size metadata", lines);
+            Assert(install.Definition.PreservedPaths.SequenceEqual(["models", "outputs"]), "Preserved path metadata", lines);
             Assert(InstalledPluginTrustValidator.Verify(install.Definition, publishers).IsTrusted, "Installed command trust validation", lines);
             install.Definition.Arguments = "--tampered";
             Assert(!InstalledPluginTrustValidator.Verify(install.Definition, publishers).IsTrusted, "Catalog tamper detection", lines);
             install.Definition.Arguments = manifest.Arguments;
+
+            var sizeMismatchManifest = CloneManifest(manifest);
+            sizeMismatchManifest.PackageSizeBytes++;
+            ResignManifest(sizeMismatchManifest, rsa);
+            await AssertThrowsAsync<InvalidDataException>(
+                () => packageService.InstallAsync(sizeMismatchManifest, packagePath, Path.Combine(testRoot, "size-mismatch")),
+                "Package size mismatch rejection",
+                lines);
+
+            var legacyManifest = CloneManifest(manifest);
+            legacyManifest.SchemaVersion = 3;
+            legacyManifest.Runtime = string.Empty;
+            legacyManifest.RuntimeVersion = string.Empty;
+            legacyManifest.PackageSizeBytes = 0;
+            legacyManifest.PreservedPaths = [];
+            ResignManifest(legacyManifest, rsa);
+            var legacyInstall = await packageService.InstallAsync(legacyManifest, packagePath, Path.Combine(testRoot, "legacy-v3"));
+            Assert(File.Exists(Path.Combine(legacyInstall.Definition.RootDirectory, "start.cmd")), "Legacy manifest v3 compatibility", lines);
+
+            var builtInCatalog = BuiltInPluginCatalog.CreateCatalog(new LauncherSettings
+            {
+                WooshRoot = Path.Combine(testRoot, "Woosh"),
+                StableRoot = Path.Combine(testRoot, "Stable Audio 3"),
+                IndexTtsRoot = Path.Combine(testRoot, "IndexTTS"),
+                WooshPort = 17860,
+                StablePort = 17861,
+                IndexTtsPort = 17862
+            });
+            Assert(builtInCatalog.Models.Count == 3 && builtInCatalog.Models.All(model => model.IsBuiltIn), "Three built-in manifest definitions", lines);
+            Assert(builtInCatalog.Models.Select(model => model.Port).Distinct().Count() == 3, "Built-in fixed port uniqueness", lines);
+            Assert(builtInCatalog.Models.All(model => model.Runtime == "python" && model.RuntimeVersion == ">=3.10"), "Built-in structured Python requirements", lines);
+            Assert(builtInCatalog.Models.All(model => model.PreservedPaths.Contains("checkpoints")), "Built-in preserved model directories", lines);
 
             var assessment = ResourceScheduler.Assess(
                 install.Definition.ToServiceProfileForSelfTest(),
@@ -271,6 +312,16 @@ internal static class LauncherSelfTests
 
     private static ServiceProfile ToServiceProfileForSelfTest(this LauncherModelDefinition definition)
         => new(definition.DisplayName, definition.Description, definition.RootDirectory, Path.Combine(definition.RootDirectory, definition.Executable), definition.Arguments, definition.Port, definition.IsHighVram, definition.RequiredFiles, 0, 0, definition.Dependencies);
+
+    private static PluginPackageManifest CloneManifest(PluginPackageManifest manifest)
+        => System.Text.Json.JsonSerializer.Deserialize<PluginPackageManifest>(
+            System.Text.Json.JsonSerializer.Serialize(manifest))!;
+
+    private static void ResignManifest(PluginPackageManifest manifest, RSA rsa)
+    {
+        var payload = Encoding.UTF8.GetBytes(PluginManifestSignatureVerifier.CreateCanonicalPayload(manifest));
+        manifest.Signature.Value = Convert.ToBase64String(rsa.SignData(payload, HashAlgorithmName.SHA256, RSASignaturePadding.Pkcs1));
+    }
 
     private static void Assert(bool condition, string name, ICollection<string> lines)
     {

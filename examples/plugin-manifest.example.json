@@ -1,5 +1,5 @@
 {
-  "schemaVersion": 3,
+  "schemaVersion": 4,
   "id": "example-image-plugin",
   "displayName": "Example Image Plugin",
   "version": "1.0.0",
@@ -8,6 +8,8 @@
   "description": "Example signed plugin package for BaChen AI Launcher.",
   "executable": "runtime/python.exe",
   "arguments": "app.py --host 127.0.0.1 --port {port}",
+  "runtime": "python",
+  "runtimeVersion": ">=3.10,<3.13",
   "port": 7870,
   "recommendedVramMiB": 6144,
   "recommendedSystemMemoryMiB": 16384,
@@ -24,6 +26,12 @@
   "gitHubBranch": "main",
   "packageUrl": "https://example.com/example-image-plugin-1.0.0.zip",
   "packageSha256": "REPLACE_WITH_64_CHARACTER_SHA256",
+  "packageSizeBytes": 123456789,
+  "preservedPaths": [
+    "models",
+    "outputs",
+    "config/user.json"
+  ],
   "licenseName": "Example Model License",
   "licenseUrl": "https://example.com/license",
   "requiresLicenseAcceptance": true,

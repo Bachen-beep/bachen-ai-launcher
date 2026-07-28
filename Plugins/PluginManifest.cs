@@ -2,7 +2,7 @@ namespace BaChenAiLauncher;
 
 internal sealed class PluginPackageManifest
 {
-    public int SchemaVersion { get; set; } = 3;
+    public int SchemaVersion { get; set; } = 4;
     public string Id { get; set; } = string.Empty;
     public string DisplayName { get; set; } = string.Empty;
     public string Version { get; set; } = "0.0.0";
@@ -11,6 +11,8 @@ internal sealed class PluginPackageManifest
     public string Description { get; set; } = string.Empty;
     public string Executable { get; set; } = string.Empty;
     public string Arguments { get; set; } = string.Empty;
+    public string Runtime { get; set; } = string.Empty;
+    public string RuntimeVersion { get; set; } = string.Empty;
     public int Port { get; set; }
     public int RecommendedVramMiB { get; set; }
     public int RecommendedSystemMemoryMiB { get; set; } = 8192;
@@ -21,6 +23,8 @@ internal sealed class PluginPackageManifest
     public string GitHubBranch { get; set; } = "main";
     public string PackageUrl { get; set; } = string.Empty;
     public string PackageSha256 { get; set; } = string.Empty;
+    public long PackageSizeBytes { get; set; }
+    public string[] PreservedPaths { get; set; } = [];
     public string LicenseName { get; set; } = string.Empty;
     public string LicenseUrl { get; set; } = string.Empty;
     public bool RequiresLicenseAcceptance { get; set; } = true;

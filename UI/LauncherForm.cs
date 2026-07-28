@@ -778,9 +778,6 @@ internal enum LauncherUpdateChoice
 
 internal sealed class LauncherForm : Form
 {
-    private static readonly string WindowsPowerShellPath = Path.Combine(
-        Environment.GetEnvironmentVariable("WINDIR") ?? @"C:\Windows",
-        "System32", "WindowsPowerShell", "v1.0", "powershell.exe");
     private static readonly string SettingsPath = Path.Combine(
         LauncherPaths.UserConfigDirectory,
         "launcher.settings.json");
@@ -892,57 +889,48 @@ internal sealed class LauncherForm : Form
 
     private void ConfigureProfiles()
     {
-        var updateSources = new List<GitHubUpdateSource>
-        {
-            new("Woosh", "SonyResearch/Woosh", "main", _settings.WooshRoot,
-                ["gradio_Woosh-DFlow.py", "Start-Woosh-DFlow.cmd", "woosh-model-downloads.txt", "woosh-source.zip"],
-                ["pyproject.toml", "uv.lock"]),
-            new("Stable Audio 3", "Stability-AI/stable-audio-3", "main", _settings.StableRoot,
-                ["run_gradio.py", "LOCAL_DEPLOYMENT.md", "run-local-server.cmd", "start-small-sfx.cmd", "start-small-music.cmd", "start-medium.cmd", "stop-local-server.cmd", "verify-install.cmd", "hf-login.cmd"],
-                ["pyproject.toml", "uv.lock"]),
-            new("IndexTTS2", "index-tts/index-tts", "main", _settings.IndexTtsRoot,
-                ["README.md", "webui.py", "gen_subtitle.py", "tools/windows_launcher.ps1", "Start-IndexTTS.bat", "User-Guide.txt"],
-                ["pyproject.toml", "uv.lock"])
-        };
-        foreach (var definition in CustomModelDefinitions().Where(definition => !string.IsNullOrWhiteSpace(definition.GitHubRepository)))
+        var updateSources = new List<GitHubUpdateSource>();
+        foreach (var definition in _modelCatalog.Models.Where(definition => !string.IsNullOrWhiteSpace(definition.GitHubRepository)))
         {
             updateSources.Add(new GitHubUpdateSource(
                 definition.DisplayName,
                 definition.GitHubRepository.Trim(),
                 string.IsNullOrWhiteSpace(definition.GitHubBranch) ? "main" : definition.GitHubBranch.Trim(),
                 definition.RootDirectory,
-                [],
+                definition.PreservedPaths ?? [],
                 ["pyproject.toml", "requirements.txt", "uv.lock"]));
         }
         _updateSources = updateSources.ToArray();
+        _woosh = CreateBuiltInProfile("woosh-dflow");
+        _smallSfx = CreateBuiltInProfile("stable-audio-3", "run_gradio.py --model small-sfx --port {port}");
+        _smallMusic = CreateBuiltInProfile("stable-audio-3", "run_gradio.py --model small-music --port {port}");
+        _medium = CreateBuiltInProfile("stable-audio-3", "run_gradio.py --model medium --port {port}", true, 8800, 16384);
+        _indexTts = CreateBuiltInProfile("indextts2");
+    }
 
-        _woosh = new ServiceProfile(
-            "Woosh-DFlow（音效）",
-            "Sony 文本生成音效 / 环境声",
-            _settings.WooshRoot,
-            Path.Combine(_settings.WooshRoot, ".venv", "Scripts", "python.exe"),
-            $"gradio_Woosh-DFlow.py --server-name 127.0.0.1 --server-port {_settings.WooshPort}",
-            _settings.WooshPort,
-            RequiredFiles: ["gradio_Woosh-DFlow.py", "checkpoints"],
-            RecommendedVramMiB: 6800,
-            RecommendedSystemMemoryMiB: 16384,
-            Dependencies: ["python>=3.10", "cuda"]);
+    private LauncherModelDefinition BuiltInDefinition(string id)
+        => _modelCatalog.Models.Single(definition => definition.IsBuiltIn && definition.Id.Equals(id, StringComparison.OrdinalIgnoreCase));
 
-        _smallSfx = CreateStableProfile("Stable Audio 3 · small-sfx", "Stable Audio 3 短音效生成", "small-sfx");
-        _smallMusic = CreateStableProfile("Stable Audio 3 · small-music", "Stable Audio 3 音乐生成", "small-music");
-        _medium = CreateStableProfile("Stable Audio 3 · medium", "高质量模型，显存需求高", "medium", true);
-
-        _indexTts = new ServiceProfile(
-            "IndexTTS2（角色语音）",
-            "音色克隆与情绪化角色语音",
-            _settings.IndexTtsRoot,
-            WindowsPowerShellPath,
-            $"-NoProfile -ExecutionPolicy Bypass -File \"{Path.Combine(_settings.IndexTtsRoot, "tools", "windows_launcher.ps1")}\" -PreferredPort {_settings.IndexTtsPort}",
-            _settings.IndexTtsPort,
-            RequiredFiles: ["tools/windows_launcher.ps1", "webui.py", "checkpoints"],
-            RecommendedVramMiB: 7500,
-            RecommendedSystemMemoryMiB: 16384,
-            Dependencies: ["python>=3.10", "cuda"]);
+    private ServiceProfile CreateBuiltInProfile(string id, string? arguments = null, bool? isHighVram = null, int? recommendedVramMiB = null, int? recommendedSystemMemoryMiB = null)
+    {
+        var definition = BuiltInDefinition(id);
+        var executable = ExpandModelValue(definition.Executable, definition.RootDirectory, definition.Port);
+        if (!Path.IsPathRooted(executable) && (executable.Contains('/') || executable.Contains('\\')))
+        {
+            executable = Path.Combine(definition.RootDirectory, executable.Replace('/', Path.DirectorySeparatorChar));
+        }
+        return new ServiceProfile(
+            definition.DisplayName,
+            definition.Description,
+            definition.RootDirectory,
+            executable,
+            ExpandModelValue(arguments ?? definition.Arguments, definition.RootDirectory, definition.Port),
+            definition.Port,
+            isHighVram ?? definition.IsHighVram,
+            definition.RequiredFiles,
+            recommendedVramMiB ?? definition.RecommendedVramMiB,
+            recommendedSystemMemoryMiB ?? definition.RecommendedSystemMemoryMiB,
+            definition.Dependencies);
     }
 
     private IEnumerable<LauncherModelDefinition> CustomModelDefinitions()
@@ -1030,22 +1018,6 @@ internal sealed class LauncherForm : Form
         InitializeUi();
         _openButton.Enabled = _activeService is not null;
         RefreshStatus();
-    }
-
-    private ServiceProfile CreateStableProfile(string name, string description, string model, bool isMedium = false)
-    {
-        return new ServiceProfile(
-            name,
-            description,
-            _settings.StableRoot,
-            Path.Combine(_settings.StableRoot, ".venv", "Scripts", "python.exe"),
-            $"run_gradio.py --model {model} --port {_settings.StablePort}",
-            _settings.StablePort,
-            isMedium,
-            ["run_gradio.py", "stable_audio_3"],
-            isMedium ? 8800 : 2200,
-            isMedium ? 16384 : 8192,
-            ["python>=3.10", "cuda"]);
     }
 
     private static void MigrateLegacyConfiguration()
@@ -1268,22 +1240,11 @@ internal sealed class LauncherForm : Form
     }
 
     private LauncherModelCatalog CreateDefaultModelCatalog()
-    {
-        return new LauncherModelCatalog
-        {
-            SchemaVersion = 2,
-            Models =
-            [
-                new LauncherModelDefinition { Id = "woosh-dflow", DisplayName = "Woosh-DFlow", Description = "Text to sound effects and ambience", Category = "Sound design", RootDirectory = _settings.WooshRoot, Port = _settings.WooshPort, RecommendedVramMiB = 6800, RecommendedSystemMemoryMiB = 16384, RequiredFiles = ["gradio_Woosh-DFlow.py", "checkpoints"], Dependencies = ["python>=3.10", "cuda"], GitHubRepository = "SonyResearch/Woosh", InstalledVersion = "built-in", Publisher = "SonyResearch", TrustSource = "BuiltIn", IsManifestTrusted = true, IsBuiltIn = true },
-                new LauncherModelDefinition { Id = "stable-audio-3", DisplayName = "Stable Audio 3", Description = "Sound effects, music, and medium generation", Category = "Audio generation", RootDirectory = _settings.StableRoot, Port = _settings.StablePort, RecommendedVramMiB = 2200, RecommendedSystemMemoryMiB = 8192, RequiredFiles = ["run_gradio.py", "stable_audio_3"], Dependencies = ["python>=3.10", "cuda"], GitHubRepository = "Stability-AI/stable-audio-3", InstalledVersion = "built-in", Publisher = "Stability AI", TrustSource = "BuiltIn", IsManifestTrusted = true, IsBuiltIn = true },
-                new LauncherModelDefinition { Id = "indextts2", DisplayName = "IndexTTS2", Description = "Character voice and emotional speech", Category = "Character voice", RootDirectory = _settings.IndexTtsRoot, Port = _settings.IndexTtsPort, RecommendedVramMiB = 7500, RecommendedSystemMemoryMiB = 16384, RequiredFiles = ["tools/windows_launcher.ps1", "webui.py", "checkpoints"], Dependencies = ["python>=3.10", "cuda"], GitHubRepository = "index-tts/index-tts", InstalledVersion = "built-in", Publisher = "IndexTTS", TrustSource = "BuiltIn", IsManifestTrusted = true, IsBuiltIn = true }
-            ]
-        };
-    }
+        => BuiltInPluginCatalog.CreateCatalog(_settings);
 
     private static void SaveModelCatalog(LauncherModelCatalog catalog)
     {
-        catalog.SchemaVersion = 2;
+        catalog.SchemaVersion = 3;
         LauncherConfigurationStore.SaveAtomic(ModelCatalogPath, catalog);
     }
 
@@ -1302,12 +1263,19 @@ internal sealed class LauncherForm : Form
             existing.Description = definition.Description;
             existing.Category = definition.Category;
             existing.RootDirectory = definition.RootDirectory;
+            existing.Executable = definition.Executable;
+            existing.Arguments = definition.Arguments;
+            existing.Runtime = definition.Runtime;
+            existing.RuntimeVersion = definition.RuntimeVersion;
             existing.Port = definition.Port;
             existing.RecommendedVramMiB = definition.RecommendedVramMiB;
             existing.RecommendedSystemMemoryMiB = definition.RecommendedSystemMemoryMiB;
             existing.RequiredFiles = definition.RequiredFiles;
             existing.Dependencies = definition.Dependencies;
             existing.GitHubRepository = definition.GitHubRepository;
+            existing.GitHubBranch = definition.GitHubBranch;
+            existing.PackageSizeBytes = definition.PackageSizeBytes;
+            existing.PreservedPaths = definition.PreservedPaths;
             if (string.IsNullOrWhiteSpace(existing.InstalledVersion) || existing.InstalledVersion == "local")
             {
                 existing.InstalledVersion = definition.InstalledVersion;
