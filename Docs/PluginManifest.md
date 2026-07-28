@@ -1,4 +1,4 @@
-# BaChen Plugin Manifest v4
+# BaChen Plugin Manifest v5
 
 BaChen AI Launcher 只会从经过信任的 RSA 公钥验证成功的清单安装插件。安装包还必须通过清单中的 SHA-256 校验。
 
@@ -10,7 +10,7 @@ BaChen AI Launcher 只会从经过信任的 RSA 公钥验证成功的清单安�
 
 ## Required fields
 
-- `schemaVersion`: 新插件使用 `4`；启动器继续兼容已签名的 v2 和 v3 清单。
+- `schemaVersion`: 新插件使用 `5`；启动器继续兼容已签名的 v2、v3 和 v4 清单。
 - `id`: 小写稳定 ID，只能包含字母、数字、`-` 和 `_`。
 - `displayName`, `version`, `publisher`, `category`, `description`。
 - `executable`: 相对于插件目录的启动程序。
@@ -19,11 +19,25 @@ BaChen AI Launcher 只会从经过信任的 RSA 公钥验证成功的清单安�
 - `port`: `1024` 到 `65535` 的独立端口。
 - `packageSha256`: ZIP 文件的 64 位十六进制 SHA-256。
 - `packageSizeBytes`: ZIP 文件的精确字节数，下载和安装时都会校验。
+- `packageMirrors`: 可选 HTTPS 镜像列表；主地址失败后按顺序重试。
 - `preservedPaths`: 更新时必须保留的插件内相对目录或文件，例如模型、输出和用户配置。
 - `signature`: `keyId`、`RSA-SHA256` 和 Base64 签名。
 - `licenseName`: 插件或模型适用的许可证名称。
 - `licenseUrl`: 指向完整上游条款的 HTTPS 地址。
-- `requiresLicenseAcceptance`: v3 必须为 `true`，安装前需要用户主动接受。
+- `requiresLicenseAcceptance`: v3 及以上必须为 `true`，安装前需要用户主动接受。
+
+## Installation fields
+
+- `createVirtualEnvironment`: 为 Python 插件自动建立独立虚拟环境。
+- `virtualEnvironmentPath`: 虚拟环境在插件目录中的安全相对路径。
+- `requirementsFile`: 可选依赖文件；创建环境后使用 pip 安装。
+- `minimumFreeDiskBytes`: 除安装包展开空间外要求保留的最低磁盘空间。
+- `requiresExternalAuthorization`: 模型是否需要用户在外部平台自行完成授权。
+- `modelProvider`, `modelId`: 当前支持 `huggingface` 和对应模型 ID。
+- `authorizationUrl`: 用户自行注册、登录和接受条款的官方 HTTPS 页面。
+- `authorizationProbePath`: 用于验证实际模型读取权限的小文件路径。
+
+启动器不会替用户注册账户、提交许可协议或申请 gated model 权限。令牌只以只读用途保存到 Windows Credential Manager，不写入插件清单、配置文件或诊断日志。
 
 ## Dependencies
 

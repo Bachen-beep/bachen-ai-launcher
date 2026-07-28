@@ -1,5 +1,5 @@
 {
-  "schemaVersion": 4,
+  "schemaVersion": 5,
   "id": "example-image-plugin",
   "displayName": "Example Image Plugin",
   "version": "1.0.0",
@@ -25,6 +25,9 @@
   "gitHubRepository": "owner/repository",
   "gitHubBranch": "main",
   "packageUrl": "https://example.com/example-image-plugin-1.0.0.zip",
+  "packageMirrors": [
+    "https://mirror.example.com/example-image-plugin-1.0.0.zip"
+  ],
   "packageSha256": "REPLACE_WITH_64_CHARACTER_SHA256",
   "packageSizeBytes": 123456789,
   "preservedPaths": [
@@ -35,6 +38,15 @@
   "licenseName": "Example Model License",
   "licenseUrl": "https://example.com/license",
   "requiresLicenseAcceptance": true,
+  "createVirtualEnvironment": true,
+  "virtualEnvironmentPath": ".venv",
+  "requirementsFile": "requirements.txt",
+  "minimumFreeDiskBytes": 2147483648,
+  "requiresExternalAuthorization": true,
+  "modelProvider": "huggingface",
+  "modelId": "publisher/gated-model",
+  "authorizationUrl": "https://huggingface.co/publisher/gated-model",
+  "authorizationProbePath": "config.json",
   "signature": {
     "keyId": "example-publisher-2026",
     "algorithm": "RSA-SHA256",
