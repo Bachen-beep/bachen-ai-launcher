@@ -16,6 +16,9 @@
 - 卸载时把托管插件移动到备份，不直接永久删除
 - 显示插件版本、发布者、依赖和信任状态
 - GitHub 源码更新预览、依赖变化检测和版本回滚
+- RSA 签名的启动器自更新、SHA-256 下载校验和上一版本回滚
+- 持久轮转日志、全局崩溃日志和一键脱敏诊断导出
+- 轻量 Inno Setup 安装包，升级和卸载默认保留用户配置与插件数据
 - 内置插件、自定义本地配置和签名第三方插件采用不同信任来源
 
 插件清单规范、依赖格式和发布者签名流程参见 `Docs/PluginManifest.md`。
@@ -48,6 +51,16 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File ".\scripts\Publish.ps1"
 ```
 
 发布结果位于 `artifacts\release\BaChen AI Launcher.exe`。发布脚本会验证目录中只有一个 EXE，不包含 PDB、用户设置、模型清单或本机路径文件。
+
+## 安装包
+
+安装 Inno Setup 6 后运行：
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File ".\scripts\Build-Installer.ps1" -Version "0.12.0"
+```
+
+安装包位于 `artifacts\installer`。安装包只包含启动器、许可证和第三方声明，不包含插件、Python 环境或模型权重。阶段二发布边界与验收标准参见 `Docs/StageTwoReleasePlan.md`，签名配置参见 `Docs/ReleaseSigning.md`。
 
 ## 用户数据
 
