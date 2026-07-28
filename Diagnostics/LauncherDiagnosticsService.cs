@@ -32,6 +32,17 @@ internal sealed class LauncherDiagnosticsService
         return fullPath;
     }
 
+    public IEnumerable<string> ReadPersistentLogs()
+    {
+        foreach (var name in new[] { "launcher.log", "crash.log", "update-error.log" })
+        {
+            var path = Path.Combine(LogDirectory, name);
+            if (!File.Exists(path)) continue;
+            yield return $"--- {name} ---";
+            foreach (var line in File.ReadLines(path).TakeLast(2000)) yield return line;
+        }
+    }
+
     private static string Redact(string value)
     {
         var result = value;

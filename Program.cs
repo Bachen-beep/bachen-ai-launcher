@@ -22,6 +22,7 @@ internal static class Program
         {
             return LauncherSelfTests.WriteCanonicalManifestPayloadAsync(args[1], args[2]).GetAwaiter().GetResult();
         }
+        LauncherCrashReporter.Initialize();
         ApplicationConfiguration.Initialize();
         Application.Run(new LauncherForm());
         return 0;

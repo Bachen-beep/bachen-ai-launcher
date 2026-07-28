@@ -4044,6 +4044,8 @@ internal sealed class LauncherForm : Form
             "Runtime log:"
         };
         lines.AddRange(_logEntries.Select(entry => $"[{entry.Timestamp:O}] [{entry.ServiceName ?? "Launcher"}] {(entry.IsError ? "ERROR" : "INFO")} {entry.Message}"));
+        lines.Add("");
+        lines.AddRange(_diagnosticsService.ReadPersistentLogs());
         var output = _diagnosticsService.Export(dialog.FileName, lines);
         MessageBox.Show(L($"诊断包已导出：\n{output}", $"Diagnostics exported to:\n{output}"), L("导出完成", "Export complete"), MessageBoxButtons.OK, MessageBoxIcon.Information);
     }

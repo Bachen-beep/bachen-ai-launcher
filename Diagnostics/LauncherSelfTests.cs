@@ -117,6 +117,18 @@ internal static class LauncherSelfTests
             await File.WriteAllTextAsync(settingsPath, "{ invalid json", Encoding.UTF8);
             _ = LauncherConfigurationStore.LoadOrCreate(settingsPath, () => new LauncherSettings());
             Assert(Directory.EnumerateFiles(Path.Combine(Path.GetDirectoryName(settingsPath)!, "backups", "corrupt-config")).Any(), "Corrupt configuration archival", lines);
+            var previousToken = Environment.GetEnvironmentVariable("HF_TOKEN");
+            try
+            {
+                Environment.SetEnvironmentVariable("HF_TOKEN", "self-test-secret-token");
+                var diagnosticsPath = Path.Combine(testRoot, "diagnostics.txt");
+                new LauncherDiagnosticsService().Export(diagnosticsPath, ["token=self-test-secret-token"]);
+                Assert(!File.ReadAllText(diagnosticsPath).Contains("self-test-secret-token", StringComparison.Ordinal), "Diagnostic secret redaction", lines);
+            }
+            finally
+            {
+                Environment.SetEnvironmentVariable("HF_TOKEN", previousToken);
+            }
             lines.Add("SELF TEST PASSED");
             await WriteReportAsync(reportPath, lines);
             return 0;
