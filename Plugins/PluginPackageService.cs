@@ -132,7 +132,7 @@ internal sealed class PluginPackageService(HttpClient httpClient)
 
     private static void ValidateManifest(PluginPackageManifest manifest)
     {
-        if (manifest.SchemaVersion != 2)
+        if (manifest.SchemaVersion is not (2 or 3))
         {
             throw new InvalidDataException($"Unsupported plugin manifest schema: {manifest.SchemaVersion}.");
         }
@@ -155,6 +155,14 @@ internal sealed class PluginPackageService(HttpClient httpClient)
         if (manifest.PackageSha256.Length != 64 || manifest.PackageSha256.Any(character => !Uri.IsHexDigit(character)))
         {
             throw new InvalidDataException("packageSha256 must contain 64 hexadecimal characters.");
+        }
+        if (manifest.SchemaVersion >= 3 &&
+            (string.IsNullOrWhiteSpace(manifest.LicenseName) ||
+             !Uri.TryCreate(manifest.LicenseUrl, UriKind.Absolute, out var licenseUri) ||
+             licenseUri.Scheme != Uri.UriSchemeHttps ||
+             !manifest.RequiresLicenseAcceptance))
+        {
+            throw new InvalidDataException("Schema v3 plugins must provide a license name, an HTTPS license URL, and require explicit acceptance.");
         }
     }
 

@@ -1,5 +1,5 @@
 {
-  "schemaVersion": 2,
+  "schemaVersion": 3,
   "id": "example-image-plugin",
   "displayName": "Example Image Plugin",
   "version": "1.0.0",
@@ -24,6 +24,9 @@
   "gitHubBranch": "main",
   "packageUrl": "https://example.com/example-image-plugin-1.0.0.zip",
   "packageSha256": "REPLACE_WITH_64_CHARACTER_SHA256",
+  "licenseName": "Example Model License",
+  "licenseUrl": "https://example.com/license",
+  "requiresLicenseAcceptance": true,
   "signature": {
     "keyId": "example-publisher-2026",
     "algorithm": "RSA-SHA256",

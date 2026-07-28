@@ -1,4 +1,4 @@
-# BaChen Plugin Manifest v2
+# BaChen Plugin Manifest v3
 
 BaChen AI Launcher 只会从经过信任的 RSA 公钥验证成功的清单安装插件。安装包还必须通过清单中的 SHA-256 校验。
 
@@ -10,7 +10,7 @@ BaChen AI Launcher 只会从经过信任的 RSA 公钥验证成功的清单安�
 
 ## Required fields
 
-- `schemaVersion`: 当前固定为 `2`。
+- `schemaVersion`: 新插件使用 `3`；启动器继续兼容已签名的 v2 清单。
 - `id`: 小写稳定 ID，只能包含字母、数字、`-` 和 `_`。
 - `displayName`, `version`, `publisher`, `category`, `description`。
 - `executable`: 相对于插件目录的启动程序。
@@ -18,6 +18,9 @@ BaChen AI Launcher 只会从经过信任的 RSA 公钥验证成功的清单安�
 - `port`: `1024` 到 `65535` 的独立端口。
 - `packageSha256`: ZIP 文件的 64 位十六进制 SHA-256。
 - `signature`: `keyId`、`RSA-SHA256` 和 Base64 签名。
+- `licenseName`: 插件或模型适用的许可证名称。
+- `licenseUrl`: 指向完整上游条款的 HTTPS 地址。
+- `requiresLicenseAcceptance`: v3 必须为 `true`，安装前需要用户主动接受。
 
 ## Dependencies
 

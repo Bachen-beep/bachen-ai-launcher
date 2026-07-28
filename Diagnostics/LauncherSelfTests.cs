@@ -57,6 +57,9 @@ internal static class LauncherSelfTests
                 RequiredFiles = ["model.dat"],
                 Dependencies = ["file:model.dat"],
                 PackageSha256 = packageHash,
+                LicenseName = "Self Test License",
+                LicenseUrl = "https://example.com/self-test-license",
+                RequiresLicenseAcceptance = true,
                 Signature = new PluginManifestSignature { KeyId = "self-test-key", Algorithm = "RSA-SHA256" }
             };
             var payload = Encoding.UTF8.GetBytes(PluginManifestSignatureVerifier.CreateCanonicalPayload(manifest));
@@ -85,6 +88,7 @@ internal static class LauncherSelfTests
             launcherUpdate.Sha256 = new string('A', 64);
 
             Assert(PluginManifestSignatureVerifier.Verify(manifest, publishers).IsTrusted, "Signed manifest verification", lines);
+            Assert(manifest.SchemaVersion == 3 && manifest.RequiresLicenseAcceptance, "Plugin license metadata", lines);
             manifest.Description += " tampered";
             Assert(!PluginManifestSignatureVerifier.Verify(manifest, publishers).IsTrusted, "Manifest tamper detection", lines);
             manifest.Description = "Installer verification fixture";

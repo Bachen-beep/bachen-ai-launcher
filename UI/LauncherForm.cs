@@ -2311,6 +2311,11 @@ internal sealed class LauncherForm : Form
             return;
         }
 
+        if (manifest.SchemaVersion >= 3 && !ConfirmPluginLicenseAcceptance(manifest))
+        {
+            return;
+        }
+
         var existing = _modelCatalog.Models.FirstOrDefault(model => model.Id.Equals(manifest.Id, StringComparison.OrdinalIgnoreCase));
         var usedPorts = _modelCatalog.Models.Where(model => existing is null || !model.Id.Equals(existing.Id, StringComparison.OrdinalIgnoreCase)).Select(model => model.Port);
         if (usedPorts.Contains(manifest.Port))
@@ -2379,6 +2384,22 @@ internal sealed class LauncherForm : Form
             AppendLog(L("插件安装失败：", "Plugin installation failed: ") + ex.Message, null, true);
             MessageBox.Show(ex.Message, L("安装失败", "Installation failed"), MessageBoxButtons.OK, MessageBoxIcon.Error);
         }
+    }
+
+    private bool ConfirmPluginLicenseAcceptance(PluginPackageManifest manifest)
+    {
+        using var dialog = new Form { Text = L("插件许可确认", "Plugin license agreement"), StartPosition = FormStartPosition.CenterParent, FormBorderStyle = FormBorderStyle.FixedDialog, ClientSize = new Size(720, 300), MaximizeBox = false, MinimizeBox = false, ShowInTaskbar = false, BackColor = Theme.Card, Font = new Font("Microsoft YaHei UI", 10F) };
+        var message = new Label { Text = L($"{manifest.DisplayName} 由 {manifest.Publisher} 发布。安装和使用受“{manifest.LicenseName}”约束。请先阅读上游条款；启动器不会替代发布者授予任何权利。", $"{manifest.DisplayName} is published by {manifest.Publisher} and governed by {manifest.LicenseName}. Review the upstream terms first; the launcher does not grant rights on the publisher's behalf."), Location = new Point(28, 24), Size = new Size(664, 86), ForeColor = Theme.Ink };
+        var link = new LinkLabel { Text = L("打开完整许可条款", "Open full license terms"), Location = new Point(28, 118), Size = new Size(260, 30), LinkColor = Theme.MidTeal };
+        link.Click += (_, _) => Process.Start(new ProcessStartInfo(manifest.LicenseUrl) { UseShellExecute = true });
+        var accepted = new CheckBox { Text = L("我已阅读并接受此插件及模型的许可条款", "I have read and accept the plugin and model license terms"), Location = new Point(28, 166), Size = new Size(600, 34), ForeColor = Theme.Ink, BackColor = Theme.Card };
+        var cancel = new Button { Text = L("取消", "Cancel"), DialogResult = DialogResult.Cancel, Location = new Point(456, 232), Size = new Size(110, 40) };
+        var install = new Button { Text = L("接受并继续", "Accept and continue"), DialogResult = DialogResult.OK, Location = new Point(578, 232), Size = new Size(114, 40), Enabled = false };
+        accepted.CheckedChanged += (_, _) => install.Enabled = accepted.Checked;
+        dialog.Controls.AddRange([message, link, accepted, cancel, install]);
+        dialog.AcceptButton = install;
+        dialog.CancelButton = cancel;
+        return dialog.ShowDialog(this) == DialogResult.OK && accepted.Checked;
     }
 
     private void UninstallSelectedPlugin()

@@ -46,6 +46,35 @@ internal static class PluginManifestSignatureVerifier
 
     public static string CreateCanonicalPayload(PluginPackageManifest manifest)
     {
+        if (manifest.SchemaVersion >= 3)
+        {
+            var versionThreePayload = new
+            {
+                manifest.SchemaVersion,
+                manifest.Id,
+                manifest.DisplayName,
+                manifest.Version,
+                manifest.Publisher,
+                manifest.Category,
+                manifest.Description,
+                manifest.Executable,
+                manifest.Arguments,
+                manifest.Port,
+                manifest.RecommendedVramMiB,
+                manifest.RecommendedSystemMemoryMiB,
+                manifest.IsHighVram,
+                RequiredFiles = manifest.RequiredFiles ?? [],
+                Dependencies = manifest.Dependencies ?? [],
+                manifest.GitHubRepository,
+                manifest.GitHubBranch,
+                manifest.PackageUrl,
+                PackageSha256 = manifest.PackageSha256.ToUpperInvariant(),
+                manifest.LicenseName,
+                manifest.LicenseUrl,
+                manifest.RequiresLicenseAcceptance
+            };
+            return JsonSerializer.Serialize(versionThreePayload, CanonicalJsonOptions);
+        }
         var payload = new
         {
             manifest.SchemaVersion,
