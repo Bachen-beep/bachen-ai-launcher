@@ -1,0 +1,56 @@
+name: Windows CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: windows-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up .NET 10
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Restore
+        run: dotnet restore ".\BaChen AI Launcher.csproj"
+
+      - name: Build
+        run: dotnet build ".\BaChen AI Launcher.csproj" -c Release --no-restore
+
+      - name: Run launcher self-tests
+        shell: pwsh
+        run: |
+          $report = Join-Path $env:RUNNER_TEMP "launcher-self-tests.txt"
+          dotnet ".\bin\Release\net10.0-windows\BaChen AI Launcher.dll" --self-test $report
+          if ($LASTEXITCODE -ne 0) { Get-Content $report; exit $LASTEXITCODE }
+          Get-Content $report
+
+      - name: Publish single-file launcher
+        shell: pwsh
+        run: .\scripts\Publish.ps1
+
+      - name: Verify release boundary
+        shell: pwsh
+        run: |
+          $files = @(Get-ChildItem ".\artifacts\release" -File)
+          if ($files.Count -ne 1 -or $files[0].Name -ne "BaChen AI Launcher.exe") {
+            throw "Release must contain exactly one launcher EXE. Found: $($files.Name -join ', ')"
+          }
+          if ($files[0].Length -lt 1MB) { throw "Published launcher is unexpectedly small." }
+
+      - name: Upload verified launcher
+        uses: actions/upload-artifact@v4
+        with:
+          name: bachen-ai-launcher-win-x64
+          path: artifacts/release/BaChen AI Launcher.exe
+          if-no-files-found: error
