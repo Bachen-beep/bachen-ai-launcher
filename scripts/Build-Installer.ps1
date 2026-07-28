@@ -17,6 +17,7 @@ if ([string]::IsNullOrWhiteSpace($CompilerPath)) {
     $command = Get-Command iscc.exe -ErrorAction SilentlyContinue
     $candidates = @(
         $(if ($command) { $command.Source }),
+        (Join-Path $env:LOCALAPPDATA "Programs\Inno Setup 6\ISCC.exe"),
         (Join-Path ${env:ProgramFiles(x86)} "Inno Setup 6\ISCC.exe"),
         (Join-Path $env:ProgramFiles "Inno Setup 6\ISCC.exe")
     ) | Where-Object { $_ -and (Test-Path -LiteralPath $_) }

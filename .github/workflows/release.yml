@@ -31,8 +31,9 @@ jobs:
           if ($project.Project.PropertyGroup.Version[0] -ne $Matches.version) {
             throw "Tag version $($Matches.version) does not match project version $($project.Project.PropertyGroup.Version[0])."
           }
+          $isPrerelease = -not [string]::IsNullOrEmpty($Matches.suffix)
           "version=$($Matches.version)" >> $env:GITHUB_OUTPUT
-          "prerelease=$([bool]$Matches.suffix)".ToLowerInvariant() >> $env:GITHUB_OUTPUT
+          "prerelease=$($isPrerelease.ToString().ToLowerInvariant())" >> $env:GITHUB_OUTPUT
 
       - name: Build and self-test
         shell: pwsh
@@ -96,13 +97,6 @@ jobs:
             -ReleaseNotesUrl "https://github.com/${{ github.repository }}/releases/tag/$tag" `
             -PrivateKeyPath $keyPath `
             -OutputPath ".\artifacts\launcher-update.json"
-          $installer = Get-Item ".\artifacts\installer\BaChen-AI-Launcher-Setup-$version.exe"
-          $checksums = @(
-            "$((Get-FileHash '.\artifacts\BaChen.AI.Launcher.exe' -Algorithm SHA256).Hash)  BaChen.AI.Launcher.exe",
-            "$((Get-FileHash $installer.FullName -Algorithm SHA256).Hash)  $($installer.Name)",
-            "$((Get-FileHash '.\artifacts\launcher-update.json' -Algorithm SHA256).Hash)  launcher-update.json"
-          )
-          [IO.File]::WriteAllLines((Join-Path $PWD "artifacts\SHA256SUMS.txt"), $checksums)
 
       - name: Authenticode sign installer
         if: steps.certificate.outputs.available == 'true'
@@ -116,6 +110,17 @@ jobs:
           & $signTool.FullName sign /fd SHA256 /td SHA256 /tr http://timestamp.digicert.com /f "${{ steps.certificate.outputs.path }}" /p $env:PFX_PASSWORD $installer.FullName
           if ($LASTEXITCODE -ne 0) { throw "Installer signing failed." }
           if ((Get-AuthenticodeSignature $installer.FullName).Status -ne "Valid") { throw "Installer signature verification failed." }
+
+      - name: Generate final checksums
+        shell: pwsh
+        run: |
+          $installer = Get-Item ".\artifacts\installer\BaChen-AI-Launcher-Setup-${{ steps.version.outputs.version }}.exe"
+          $checksums = @(
+            "$((Get-FileHash '.\artifacts\BaChen.AI.Launcher.exe' -Algorithm SHA256).Hash)  BaChen.AI.Launcher.exe",
+            "$((Get-FileHash $installer.FullName -Algorithm SHA256).Hash)  $($installer.Name)",
+            "$((Get-FileHash '.\artifacts\launcher-update.json' -Algorithm SHA256).Hash)  launcher-update.json"
+          )
+          [IO.File]::WriteAllLines((Join-Path $PWD "artifacts\SHA256SUMS.txt"), $checksums)
 
       - name: Publish GitHub release
         uses: softprops/action-gh-release@v2
