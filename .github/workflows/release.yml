@@ -124,6 +124,17 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw "Installer signing failed." }
           if ((Get-AuthenticodeSignature $installer.FullName).Status -ne "Valid") { throw "Installer signature verification failed." }
 
+      - name: Test standalone and installed distribution
+        shell: pwsh
+        run: |
+          $version = "${{ steps.version.outputs.version }}"
+          $report = Join-Path $env:RUNNER_TEMP "distribution-test.txt"
+          .\scripts\Test-Distribution.ps1 `
+            -LauncherPath ".\artifacts\BaChen.AI.Launcher.exe" `
+            -InstallerPath ".\artifacts\installer\BaChen-AI-Launcher-Setup-$version.exe" `
+            -ReportPath $report
+          Get-Content $report
+
       - name: Generate SPDX SBOM
         uses: anchore/sbom-action@v0.24.0
         with:

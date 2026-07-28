@@ -26,6 +26,8 @@
   and retained diagnostic log location.
 - Verify install, launch, update, rollback, and uninstall without starting an AI
   model unless that test explicitly requires one.
+- Run `scripts/Test-Distribution.ps1` against the final launcher and installer;
+  retain its report with the release evidence.
 
 ## Promotion
 
