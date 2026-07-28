@@ -49,7 +49,8 @@ internal sealed class LauncherSettings
     public int StablePort { get; set; } = 7861;
     public int IndexTtsPort { get; set; } = 7862;
     public bool AutomaticallyCheckLauncherUpdates { get; set; } = true;
-    public LauncherUpdateChannel LauncherUpdateChannel { get; set; } = LauncherUpdateChannel.Preview;
+    public LauncherUpdateChannel LauncherUpdateChannel { get; set; } = LauncherUpdateChannel.Stable;
+    public string GitHubProxyUrl { get; set; } = string.Empty;
     public string SkippedLauncherVersion { get; set; } = string.Empty;
     public DateTimeOffset? LauncherUpdateDeferredUntil { get; set; }
     public bool FirstRunCompleted { get; set; } = true;

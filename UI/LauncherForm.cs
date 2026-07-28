@@ -790,14 +790,14 @@ internal sealed class LauncherForm : Form
     private static readonly string LauncherVersion =
         typeof(LauncherForm).Assembly.GetName().Version?.ToString(3) ?? "0.9.0";
 
-    private static readonly HttpClient GitHubClient = CreateGitHubClient();
-    private readonly PluginPackageService _pluginPackageService = new(GitHubClient);
-    private readonly PluginDownloadService _pluginDownloadService = new(GitHubClient);
-    private readonly PluginCatalogService _pluginCatalogService = new(GitHubClient);
-    private readonly GitHubModelImportService _gitHubModelImportService = new(GitHubClient);
-    private readonly ExternalModelAuthorizationService _authorizationService = new(GitHubClient);
-    private readonly GitHubUpdateService _sourceUpdateService = new(GitHubClient);
-    private readonly LauncherSelfUpdateService _launcherUpdateService = new(GitHubClient);
+    private HttpClient _githubClient = null!;
+    private PluginPackageService _pluginPackageService = null!;
+    private PluginDownloadService _pluginDownloadService = null!;
+    private PluginCatalogService _pluginCatalogService = null!;
+    private GitHubModelImportService _gitHubModelImportService = null!;
+    private ExternalModelAuthorizationService _authorizationService = null!;
+    private GitHubUpdateService _sourceUpdateService = null!;
+    private LauncherSelfUpdateService _launcherUpdateService = null!;
     private readonly LauncherDiagnosticsService _diagnosticsService = new();
     private LauncherSettings _settings;
     private LauncherModelCatalog _modelCatalog = new();
@@ -868,6 +868,7 @@ internal sealed class LauncherForm : Form
         NormalizeSettings(_settings);
         EnsureDataDirectories(_settings);
         SaveSettings(_settings);
+        ConfigureGitHubServices(_settings.GitHubProxyUrl);
         _modelCatalog = LoadModelCatalog();
         _trustedPublishers = TrustedPublisherStoreService.Load(TrustedPublishersPath);
         MigrateRenamedCatalogPaths(_modelCatalog);
@@ -1094,6 +1095,7 @@ internal sealed class LauncherForm : Form
     private static void NormalizeSettings(LauncherSettings settings)
     {
         settings.SchemaVersion = 3;
+        settings.GitHubProxyUrl = TryValidateProxyUrl(settings.GitHubProxyUrl, out _) ? settings.GitHubProxyUrl.Trim() : string.Empty;
         settings.DataRoot = MigrateRenamedPath(settings.DataRoot);
         settings.WooshRoot = MigrateRenamedPath(settings.WooshRoot);
         settings.StableRoot = MigrateRenamedPath(settings.StableRoot);
@@ -1265,12 +1267,47 @@ internal sealed class LauncherForm : Form
         }
     }
 
-    private static HttpClient CreateGitHubClient()
+    private static HttpClient CreateGitHubClient(string? proxyUrl = null, TimeSpan? timeout = null)
     {
-        var client = new HttpClient { Timeout = TimeSpan.FromMinutes(5) };
+        HttpMessageHandler handler = new HttpClientHandler();
+        if (!string.IsNullOrWhiteSpace(proxyUrl))
+        {
+            if (!TryValidateProxyUrl(proxyUrl, out var proxyUri))
+            {
+                throw new InvalidDataException("The GitHub proxy URL is invalid.");
+            }
+            handler = new HttpClientHandler { Proxy = new System.Net.WebProxy(proxyUri), UseProxy = true };
+        }
+        var client = new HttpClient(handler) { Timeout = timeout ?? TimeSpan.FromMinutes(5) };
         client.DefaultRequestHeaders.UserAgent.ParseAdd($"BaChen-AI-Launcher/{LauncherVersion}");
         client.DefaultRequestHeaders.Accept.ParseAdd("application/vnd.github+json");
         return client;
+    }
+
+    private void ConfigureGitHubServices(string? proxyUrl)
+    {
+        var previousClient = _githubClient;
+        _githubClient = CreateGitHubClient(proxyUrl);
+        _pluginPackageService = new PluginPackageService(_githubClient);
+        _pluginDownloadService = new PluginDownloadService(_githubClient);
+        _pluginCatalogService = new PluginCatalogService(_githubClient);
+        _gitHubModelImportService = new GitHubModelImportService(_githubClient);
+        _authorizationService = new ExternalModelAuthorizationService(_githubClient);
+        _sourceUpdateService = new GitHubUpdateService(_githubClient);
+        _launcherUpdateService = new LauncherSelfUpdateService(_githubClient);
+        previousClient?.Dispose();
+    }
+
+    internal static bool TryValidateProxyUrl(string? value, out Uri? proxyUri)
+    {
+        proxyUri = null;
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return true;
+        }
+        return Uri.TryCreate(value.Trim(), UriKind.Absolute, out proxyUri) &&
+            (proxyUri.Scheme == Uri.UriSchemeHttp || proxyUri.Scheme == Uri.UriSchemeHttps) &&
+            string.IsNullOrEmpty(proxyUri.UserInfo) && !string.IsNullOrWhiteSpace(proxyUri.Host);
     }
 
     private async Task CheckUpdatesAsync()
@@ -1437,8 +1474,13 @@ internal sealed class LauncherForm : Form
                 ? L("目前没有可用的稳定版。你可以继续使用当前版本，或在设置中切换到预览版通道。", "No stable release is currently available. Keep using this version or switch to the Preview channel in Settings.")
                 : L("目前没有可用的预览版，请稍后重试。", "No preview release is currently available. Try again later.");
         }
-        if (exception is TaskCanceledException) return L("网络请求超时，请稍后重试。", "The network request timed out. Try again later.");
-        if (exception is HttpRequestException) return L("无法连接 GitHub 更新服务，请检查网络或代理设置。", "GitHub update services could not be reached. Check the network or proxy.");
+        if (exception is TaskCanceledException) return L("网络请求超时。请在“设置”中填写本机可用的 HTTP/HTTPS 代理并测试连接。", "The request timed out. Configure and test an HTTP/HTTPS proxy in Settings.");
+        if (exception is HttpRequestException { StatusCode: System.Net.HttpStatusCode.Forbidden } rateLimitError) return L(
+            $"GitHub API 拒绝了匿名请求，通常是当前网络出口触发访问频率限制。启动器会优先改用 Stable 直连更新；添加模型可稍后重试或配置代理。\n\n失败详情：{rateLimitError.Message}",
+            $"GitHub rejected the anonymous API request, usually because the network reached its rate limit. Stable direct updates are preferred; retry model import later or configure a proxy.\n\nDetails: {rateLimitError.Message}");
+        if (exception is HttpRequestException httpError) return L(
+            $"无法连接 GitHub 更新服务。请在“设置”中测试 GitHub 连接或填写代理。\n\n失败详情：{httpError.Message}\n\n手动下载：https://github.com/Bachen-beep/bachen-ai-launcher/releases/latest",
+            $"GitHub update services could not be reached. Test the connection or configure a proxy in Settings.\n\nDetails: {httpError.Message}\n\nManual download: https://github.com/Bachen-beep/bachen-ai-launcher/releases/latest");
         if (exception is IOException && exception.Message.Contains("disk space", StringComparison.OrdinalIgnoreCase)) return L("磁盘空间不足，无法安全下载更新。", "There is not enough disk space to download the update safely.");
         return exception.Message;
     }
@@ -1643,7 +1685,7 @@ internal sealed class LauncherForm : Form
         Directory.CreateDirectory(tempRoot);
         try
         {
-            using (var response = await GitHubClient.GetAsync($"https://github.com/{source.Repository}/archive/refs/heads/{source.Branch}.zip", HttpCompletionOption.ResponseHeadersRead))
+            using (var response = await _githubClient.GetAsync($"https://github.com/{source.Repository}/archive/refs/heads/{source.Branch}.zip", HttpCompletionOption.ResponseHeadersRead))
             {
                 response.EnsureSuccessStatusCode();
                 await using var input = await response.Content.ReadAsStreamAsync();
@@ -1821,7 +1863,7 @@ internal sealed class LauncherForm : Form
             Text = L("启动器设置", "Launcher settings"),
             StartPosition = FormStartPosition.CenterParent,
             FormBorderStyle = FormBorderStyle.FixedDialog,
-            ClientSize = new Size(940, 410),
+            ClientSize = new Size(940, 465),
             MaximizeBox = false,
             MinimizeBox = false,
             ShowInTaskbar = false,
@@ -1831,25 +1873,55 @@ internal sealed class LauncherForm : Form
         var table = new TableLayoutPanel
         {
             Dock = DockStyle.Top,
-            Height = 90,
+            Height = 145,
             Padding = new Padding(24, 24, 24, 8),
             ColumnCount = 3,
-            RowCount = 1,
+            RowCount = 2,
             BackColor = Theme.Card
         };
-        table.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 175));
+        table.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 195));
         table.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
-        table.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 100));
+        table.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 110));
+        table.RowStyles.Add(new RowStyle(SizeType.Absolute, 56));
         table.RowStyles.Add(new RowStyle(SizeType.Absolute, 56));
 
         var dataRootBox = AddPathSettingRow(table, 0, L("数据根目录", "Data directory"), _settings.DataRoot, dialog);
+        var proxyBox = new TextBox { Text = _settings.GitHubProxyUrl, Dock = DockStyle.Fill, Margin = new Padding(6, 8, 6, 8), PlaceholderText = "http://127.0.0.1:7890" };
+        var testConnection = new Button { Text = L("测试连接", "Test"), Dock = DockStyle.Fill, Margin = new Padding(6) };
+        table.Controls.Add(new Label { Text = L("GitHub 代理（可选）", "GitHub proxy (optional)"), TextAlign = ContentAlignment.MiddleLeft, Dock = DockStyle.Fill }, 0, 1);
+        table.Controls.Add(proxyBox, 1, 1);
+        table.Controls.Add(testConnection, 2, 1);
+        testConnection.Click += async (_, _) =>
+        {
+            if (!TryValidateProxyUrl(proxyBox.Text, out _))
+            {
+                MessageBox.Show(L("代理地址应为 http://主机:端口 或 https://主机:端口，且不要包含账号密码。", "Use http://host:port or https://host:port without embedded credentials."), L("代理地址无效", "Invalid proxy"), MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return;
+            }
+            testConnection.Enabled = false;
+            try
+            {
+                using var testClient = CreateGitHubClient(proxyBox.Text, TimeSpan.FromSeconds(15));
+                using var response = await testClient.GetAsync(LauncherSelfUpdateService.DefaultManifestUri, HttpCompletionOption.ResponseHeadersRead);
+                response.EnsureSuccessStatusCode();
+                MessageBox.Show(L("GitHub 更新服务连接成功。", "GitHub update service connection succeeded."), L("连接测试", "Connection test"), MessageBoxButtons.OK, MessageBoxIcon.Information);
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show(L("连接失败：", "Connection failed: ") + ex.Message, L("连接测试", "Connection test"), MessageBoxButtons.OK, MessageBoxIcon.Error);
+            }
+            finally
+            {
+                testConnection.Enabled = true;
+            }
+        };
         dialog.Controls.Add(table);
 
         var automaticUpdates = new CheckBox
         {
             Text = L("启动时自动检查启动器更新", "Automatically check launcher updates at startup"),
             Checked = _settings.AutomaticallyCheckLauncherUpdates,
-            Location = new Point(28, 128),
+            Location = new Point(28, 184),
             Size = new Size(520, 32),
             ForeColor = Theme.Ink,
             BackColor = Theme.Card
@@ -1859,7 +1931,7 @@ internal sealed class LauncherForm : Form
         var updateChannelLabel = new Label
         {
             Text = L("启动器更新通道", "Launcher update channel"),
-            Location = new Point(560, 128),
+            Location = new Point(560, 184),
             Size = new Size(180, 30),
             TextAlign = ContentAlignment.MiddleLeft,
             ForeColor = Theme.Ink,
@@ -1868,7 +1940,7 @@ internal sealed class LauncherForm : Form
         var updateChannel = new ComboBox
         {
             DropDownStyle = ComboBoxStyle.DropDownList,
-            Location = new Point(742, 128),
+            Location = new Point(742, 184),
             Size = new Size(170, 30)
         };
         updateChannel.Items.AddRange([L("稳定版", "Stable"), L("预览版", "Preview")]);
@@ -1881,12 +1953,12 @@ internal sealed class LauncherForm : Form
             AutoSize = false,
             Text = L("插件端口和启动命令在各插件的添加配置中管理。更改数据目录不会移动现有插件文件。", "Plugin ports and launch commands are managed per plugin. Changing the data directory does not move existing plugin files."),
             ForeColor = Theme.Muted,
-            Location = new Point(28, 184),
+            Location = new Point(28, 240),
             Size = new Size(860, 52)
         };
         dialog.Controls.Add(note);
-        var cancel = new Button { Text = L("取消", "Cancel"), DialogResult = DialogResult.Cancel, Size = new Size(110, 38), Location = new Point(682, 342) };
-        var save = new Button { Text = L("保存", "Save"), DialogResult = DialogResult.OK, Size = new Size(110, 38), Location = new Point(806, 342) };
+        var cancel = new Button { Text = L("取消", "Cancel"), DialogResult = DialogResult.Cancel, Size = new Size(110, 38), Location = new Point(682, 397) };
+        var save = new Button { Text = L("保存", "Save"), DialogResult = DialogResult.OK, Size = new Size(110, 38), Location = new Point(806, 397) };
         dialog.Controls.Add(cancel);
         dialog.Controls.Add(save);
         dialog.AcceptButton = save;
@@ -1894,6 +1966,11 @@ internal sealed class LauncherForm : Form
 
         if (dialog.ShowDialog(this) != DialogResult.OK)
         {
+            return;
+        }
+        if (!TryValidateProxyUrl(proxyBox.Text, out _))
+        {
+            MessageBox.Show(L("代理地址格式无效。", "The proxy URL is invalid."), L("无法保存", "Cannot save"), MessageBoxButtons.OK, MessageBoxIcon.Warning);
             return;
         }
 
@@ -1909,6 +1986,7 @@ internal sealed class LauncherForm : Form
             IndexTtsPort = _settings.IndexTtsPort
             ,AutomaticallyCheckLauncherUpdates = automaticUpdates.Checked
             ,LauncherUpdateChannel = updateChannel.SelectedIndex == 1 ? LauncherUpdateChannel.Preview : LauncherUpdateChannel.Stable
+            ,GitHubProxyUrl = proxyBox.Text.Trim()
             ,SkippedLauncherVersion = _settings.SkippedLauncherVersion
             ,LauncherUpdateDeferredUntil = _settings.LauncherUpdateDeferredUntil
             ,FirstRunCompleted = _settings.FirstRunCompleted
@@ -1924,6 +2002,7 @@ internal sealed class LauncherForm : Form
         EnsureDataDirectories(updated);
         _settings = updated;
         SaveSettings(_settings);
+        ConfigureGitHubServices(_settings.GitHubProxyUrl);
         SaveModelCatalog(_modelCatalog);
         ConfigureProfiles();
         _selectedStableProfile ??= _smallSfx;
@@ -2720,9 +2799,9 @@ internal sealed class LauncherForm : Form
             AutoScroll = true,
             BackColor = Theme.Card
         };
-        table.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 150));
+        table.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 170));
         table.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
-        table.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 102));
+        table.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 118));
 
         var name = AddTextRow(table, 0, L("模型名称 *", "Model name *"), string.Empty);
         var description = AddTextRow(table, 1, L("说明", "Description"), string.Empty);
@@ -2765,13 +2844,23 @@ internal sealed class LauncherForm : Form
         var highVram = new CheckBox { Text = L("高显存模型，启动前警告", "High VRAM warning before launch"), AutoSize = true, Margin = new Padding(6, 9, 6, 6) };
         table.Controls.Add(highVram, 2, 7);
         var required = AddTextRow(table, 8, L("必需文件", "Required files"), string.Empty);
-        var repository = AddTextRow(table, 9, L("GitHub 仓库 *", "GitHub repository *"), string.Empty);
+        var repository = AddTextRow(table, 9, L("GitHub 仓库或链接 *", "GitHub repository or URL *"), string.Empty);
+        repository.PlaceholderText = "https://github.com/owner/repository";
         repository.TextChanged += (_, _) =>
         {
-            var safeName = repository.Text.Trim().Replace('/', '-').ToLowerInvariant();
+            if (!GitHubModelImportService.TryNormalizeRepository(repository.Text, out var normalizedRepository))
+            {
+                root.Text = Path.Combine(_settings.DataRoot, "plugins", "owner-repository");
+                return;
+            }
+            var safeName = normalizedRepository.Replace('/', '-').ToLowerInvariant();
             root.Text = Path.Combine(_settings.DataRoot, "plugins", string.IsNullOrWhiteSpace(safeName) ? "owner-repository" : safeName);
+            if (string.IsNullOrWhiteSpace(name.Text))
+            {
+                name.Text = normalizedRepository.Split('/')[1];
+            }
         };
-        var branch = AddTextRow(table, 10, L("更新分支", "Update branch"), "main");
+        var branch = AddTextRow(table, 10, L("更新分支（留空自动）", "Update branch (blank = default)"), string.Empty);
         var version = AddTextRow(table, 11, L("安装版本", "Installed version"), L("自动使用 commit", "Pinned commit automatically"));
         version.ReadOnly = true;
         var dependencies = AddTextRow(table, 12, L("依赖声明", "Dependencies"), string.Empty);
@@ -2792,7 +2881,7 @@ internal sealed class LauncherForm : Form
 
         var hint = new Label
         {
-            Text = L("仓库会先固定到 commit 再下载。启动程序使用相对路径；Python 项目通常填写 .venv/Scripts/python.exe，并把入口脚本写入启动参数。", "The repository is pinned to a commit before download. Use a relative executable path; Python projects normally use .venv/Scripts/python.exe and put the entry script in Arguments."),
+            Text = L("可粘贴完整 GitHub 链接或 owner/repository。分支留空会自动读取默认分支；常见 Python 入口脚本会自动识别。", "Paste a full GitHub URL or owner/repository. Leave branch blank to use the default branch; common Python entry scripts are detected automatically."),
             Location = new Point(26, 602),
             Size = new Size(650, 48),
             ForeColor = Theme.Muted
@@ -2807,23 +2896,14 @@ internal sealed class LauncherForm : Form
                 MessageBox.Show(L("请填写模型名称、GitHub 仓库和启动程序。", "Enter the model name, GitHub repository, and executable."), L("信息不完整", "Information incomplete"), MessageBoxButtons.OK, MessageBoxIcon.Warning);
                 return;
             }
-            if (repository.Text.Trim().Split('/').Length != 2)
+            if (!GitHubModelImportService.TryNormalizeRepository(repository.Text, out var normalizedRepository))
             {
-                MessageBox.Show(L("GitHub 仓库格式应为 owner/repository。", "GitHub repository must use owner/repository format."), L("仓库格式", "Repository format"), MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                MessageBox.Show(L("请输入 owner/repository、https://github.com/owner/repository 或 GitHub .git 地址。", "Enter owner/repository, https://github.com/owner/repository, or a GitHub .git URL."), L("仓库地址无效", "Invalid repository"), MessageBoxButtons.OK, MessageBoxIcon.Warning);
                 return;
             }
             if (Path.IsPathRooted(executable.Text.Trim()) || executable.Text.Contains("..", StringComparison.Ordinal))
             {
                 MessageBox.Show(L("启动程序必须是下载目录内的安全相对路径。", "Executable must be a safe path relative to the downloaded repository."), L("启动路径无效", "Invalid launch path"), MessageBoxButtons.OK, MessageBoxIcon.Warning);
-                return;
-            }
-            if (executable.Text.Trim().EndsWith("python.exe", StringComparison.OrdinalIgnoreCase) && string.IsNullOrWhiteSpace(arguments.Text))
-            {
-                MessageBox.Show(
-                    L("Python 插件必须填写启动参数，例如 app.py --server-port {port}。仅启动 python.exe 会立即退出，不能启动模型服务。", "Python plugins require launch arguments, for example app.py --server-port {port}. Starting python.exe alone exits immediately and cannot start a model service."),
-                    L("缺少启动入口", "Missing launch entry point"),
-                    MessageBoxButtons.OK,
-                    MessageBoxIcon.Warning);
                 return;
             }
             var configuredPorts = _modelCatalog.Models.Select(definition => definition.Port);
@@ -2832,7 +2912,7 @@ internal sealed class LauncherForm : Form
                 MessageBox.Show(L("该端口已经由现有模型配置使用。请为新模型分配一个不同端口。", "That port is already assigned to an existing model configuration. Choose a different port."), L("端口冲突", "Port conflict"), MessageBoxButtons.OK, MessageBoxIcon.Warning);
                 return;
             }
-            var id = repository.Text.Trim().Replace('/', '-').ToLowerInvariant();
+            var id = normalizedRepository.Replace('/', '-').ToLowerInvariant();
             if (_modelCatalog.Models.Any(model => model.Id.Equals(id, StringComparison.OrdinalIgnoreCase)))
             {
                 MessageBox.Show(L("这个 GitHub 仓库已经添加。", "This GitHub repository has already been added."), L("重复插件", "Duplicate plugin"), MessageBoxButtons.OK, MessageBoxIcon.Warning);
@@ -2848,11 +2928,21 @@ internal sealed class LauncherForm : Form
                     AppendLog(message);
                 });
                 var imported = await _gitHubModelImportService.ImportAsync(
-                    repository.Text,
+                    normalizedRepository,
                     branch.Text,
                     _settings.DataRoot,
                     importProgress);
                 root.Text = imported.RootDirectory;
+
+                var executableValue = executable.Text.Trim().Replace('\\', '/');
+                var argumentsValue = arguments.Text.Trim();
+                if (executableValue.EndsWith("python.exe", StringComparison.OrdinalIgnoreCase) && string.IsNullOrWhiteSpace(argumentsValue))
+                {
+                    argumentsValue = DetectPythonEntryPoint(imported.RootDirectory) ?? throw new InvalidOperationException(L(
+                        "仓库已下载，但无法自动识别启动入口。请查看仓库 README，并在“启动参数”中填写入口脚本，例如 app.py。",
+                        "The repository was downloaded, but no launch entry point was detected. Check its README and enter the script in Launch arguments, for example app.py."));
+                    arguments.Text = argumentsValue;
+                }
 
                 if (setupPython.Checked)
                 {
@@ -2869,7 +2959,7 @@ internal sealed class LauncherForm : Form
                         ManagedRuntimeId = ManagedPythonRuntimeService.Python312.Id,
                         PythonInstallArguments = hasPyProject ? ["-m", "pip", "install", "--disable-pip-version-check", "-e", "."] : []
                     };
-                    await PythonEnvironmentService.EnsureAsync(environmentManifest, imported.RootDirectory, _settings.DataRoot, GitHubClient, importProgress);
+                    await PythonEnvironmentService.EnsureAsync(environmentManifest, imported.RootDirectory, _settings.DataRoot, _githubClient, importProgress);
                 }
 
                 var declaredDependencies = dependencies.Text.Split(';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).ToList();
@@ -2884,8 +2974,8 @@ internal sealed class LauncherForm : Form
                     Description = description.Text.Trim(),
                     Category = string.IsNullOrWhiteSpace(category.Text) ? "Experimental" : category.Text.Trim(),
                     RootDirectory = imported.RootDirectory,
-                    Executable = executable.Text.Trim().Replace('\\', '/'),
-                    Arguments = arguments.Text.Trim(),
+                    Executable = executableValue,
+                    Arguments = argumentsValue,
                     Runtime = setupPython.Checked ? "python" : "custom",
                     RuntimeVersion = setupPython.Checked ? ">=3.12" : string.Empty,
                     Port = (int)port.Value,
@@ -2894,10 +2984,10 @@ internal sealed class LauncherForm : Form
                     IsHighVram = highVram.Checked,
                     RequiredFiles = required.Text.Split(';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).Select(item => item.Replace('\\', '/')).ToArray(),
                     Dependencies = declaredDependencies.ToArray(),
-                    GitHubRepository = repository.Text.Trim(),
-                    GitHubBranch = string.IsNullOrWhiteSpace(branch.Text) ? "main" : branch.Text.Trim(),
+                    GitHubRepository = normalizedRepository,
+                    GitHubBranch = imported.Branch,
                     InstalledVersion = imported.CommitSha[..12],
-                    Publisher = repository.Text.Trim().Split('/')[0],
+                    Publisher = normalizedRepository.Split('/')[0],
                     TrustSource = "GitHubUserImport",
                     PreservedPaths = [".venv", "models", "checkpoints", "outputs", "logs"]
                 };
@@ -2938,6 +3028,16 @@ internal sealed class LauncherForm : Form
             layout.Controls.Add(box, 1, row);
             return box;
         }
+    }
+
+    internal static string? DetectPythonEntryPoint(string repositoryRoot)
+    {
+        var candidates = new[]
+        {
+            "gradio_app.py", "app.py", "webui.py", "launch.py", "demo.py", "main.py",
+            "gradio_demo.py", "infer_gradio.py"
+        };
+        return candidates.FirstOrDefault(candidate => File.Exists(Path.Combine(repositoryRoot, candidate)));
     }
 
     private void InitializeUi()
@@ -4193,6 +4293,9 @@ internal sealed class LauncherForm : Form
                 startInfo.Environment["PYTHONUNBUFFERED"] = "1";
                 startInfo.Environment["PYTHONUTF8"] = "1";
                 startInfo.Environment["PYTHONIOENCODING"] = "utf-8";
+                startInfo.Environment["GRADIO_SERVER_NAME"] = "127.0.0.1";
+                startInfo.Environment["GRADIO_SERVER_PORT"] = profile.Port.ToString();
+                startInfo.Environment["PORT"] = profile.Port.ToString();
                 if (profile.IsMedium)
                 {
                     startInfo.Environment["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True";

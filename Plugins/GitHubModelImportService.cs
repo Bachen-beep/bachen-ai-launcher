@@ -4,10 +4,37 @@ using System.Text.RegularExpressions;
 
 namespace BaChenAiLauncher;
 
-internal sealed record GitHubModelImportResult(string RootDirectory, string CommitSha);
+internal sealed record GitHubModelImportResult(string RootDirectory, string CommitSha, string Branch);
 
 internal sealed class GitHubModelImportService(HttpClient httpClient)
 {
+    internal static bool TryNormalizeRepository(string input, out string repository)
+    {
+        repository = string.Empty;
+        input = input.Trim();
+        if (input.StartsWith("git@github.com:", StringComparison.OrdinalIgnoreCase))
+        {
+            input = input["git@github.com:".Length..];
+        }
+        else if (Uri.TryCreate(input, UriKind.Absolute, out var uri))
+        {
+            if (!uri.Scheme.Equals(Uri.UriSchemeHttps, StringComparison.OrdinalIgnoreCase) ||
+                !uri.Host.Equals("github.com", StringComparison.OrdinalIgnoreCase) ||
+                !string.IsNullOrEmpty(uri.Query) || !string.IsNullOrEmpty(uri.Fragment))
+            {
+                return false;
+            }
+            input = uri.AbsolutePath.Trim('/');
+        }
+        input = Regex.Replace(input, "\\.git$", string.Empty, RegexOptions.IgnoreCase).Trim('/');
+        if (!Regex.IsMatch(input, "^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$"))
+        {
+            return false;
+        }
+        repository = input;
+        return true;
+    }
+
     public async Task<GitHubModelImportResult> ImportAsync(
         string repository,
         string branch,
@@ -15,12 +42,21 @@ internal sealed class GitHubModelImportService(HttpClient httpClient)
         IProgress<string>? progress = null,
         CancellationToken cancellationToken = default)
     {
-        repository = repository.Trim();
-        branch = string.IsNullOrWhiteSpace(branch) ? "main" : branch.Trim();
-        if (!Regex.IsMatch(repository, "^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$") ||
-            !Regex.IsMatch(branch, "^[A-Za-z0-9._/-]+$") || branch.Contains("..", StringComparison.Ordinal))
+        if (!TryNormalizeRepository(repository, out repository))
         {
-            throw new InvalidDataException("GitHub repository or branch is invalid.");
+            throw new InvalidDataException("GitHub repository is invalid.");
+        }
+        branch = branch.Trim();
+        if (string.IsNullOrWhiteSpace(branch))
+        {
+            progress?.Report("Resolving the repository default branch");
+            var repositoryJson = await httpClient.GetStringAsync($"https://api.github.com/repos/{repository}", cancellationToken);
+            using var repositoryDocument = JsonDocument.Parse(repositoryJson);
+            branch = repositoryDocument.RootElement.GetProperty("default_branch").GetString() ?? string.Empty;
+        }
+        if (!Regex.IsMatch(branch, "^[A-Za-z0-9._/-]+$") || branch.Contains("..", StringComparison.Ordinal))
+        {
+            throw new InvalidDataException("GitHub default branch is missing or invalid.");
         }
 
         progress?.Report("Resolving the GitHub branch to an immutable commit");
@@ -51,7 +87,7 @@ internal sealed class GitHubModelImportService(HttpClient httpClient)
                 if (repository.Equals(savedRepository, StringComparison.OrdinalIgnoreCase) && commitSha.Equals(savedCommit, StringComparison.OrdinalIgnoreCase))
                 {
                     progress?.Report("Reusing the previously verified GitHub source");
-                    return new GitHubModelImportResult(targetRoot, commitSha);
+                    return new GitHubModelImportResult(targetRoot, commitSha, branch);
                 }
             }
             throw new IOException($"The managed plugin directory already exists: {targetRoot}");
@@ -97,7 +133,7 @@ internal sealed class GitHubModelImportService(HttpClient httpClient)
             {
                 Directory.Delete(stagingRoot, true);
             }
-            return new GitHubModelImportResult(targetRoot, commitSha);
+            return new GitHubModelImportResult(targetRoot, commitSha, branch);
         }
         catch
         {

@@ -23,7 +23,7 @@ internal sealed class LauncherSelfUpdateService(HttpClient client)
 
     public async Task<LauncherUpdateCheck> CheckAsync(LauncherUpdateChannel channel = LauncherUpdateChannel.Stable, Uri? manifestUri = null)
     {
-        var resolvedManifestUri = manifestUri ?? await ResolveManifestUriAsync(channel);
+        var resolvedManifestUri = manifestUri ?? await ResolveManifestUriWithFallbackAsync(channel);
         string json;
         try
         {
@@ -48,6 +48,18 @@ internal sealed class LauncherSelfUpdateService(HttpClient client)
             throw new InvalidOperationException($"This update requires launcher {minimum} or newer. Install the latest setup package manually.");
         }
         return new LauncherUpdateCheck(manifest, current, latest);
+    }
+
+    internal async Task<Uri> ResolveManifestUriWithFallbackAsync(LauncherUpdateChannel channel)
+    {
+        try
+        {
+            return await ResolveManifestUriAsync(channel);
+        }
+        catch (HttpRequestException) when (channel == LauncherUpdateChannel.Preview)
+        {
+            return DefaultManifestUri;
+        }
     }
 
     internal async Task<Uri> ResolveManifestUriAsync(LauncherUpdateChannel channel)

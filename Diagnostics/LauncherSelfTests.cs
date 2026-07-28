@@ -141,6 +141,11 @@ internal static class LauncherSelfTests
                     "GitHub server failure remains a network error",
                     lines);
             }
+            using (var previewRateLimitedClient = new HttpClient(new StatusCodeHandler(System.Net.HttpStatusCode.Forbidden)))
+            {
+                var previewRateLimitedService = new LauncherSelfUpdateService(previewRateLimitedClient);
+                Assert(await previewRateLimitedService.ResolveManifestUriWithFallbackAsync(LauncherUpdateChannel.Preview) == LauncherSelfUpdateService.DefaultManifestUri, "Preview API rate limit falls back to stable manifest", lines);
+            }
 
             var offlineDataPath = Path.Combine(testRoot, "offline-existing-plugin.dat");
             await File.WriteAllTextAsync(offlineDataPath, "preserve", Encoding.ASCII);
@@ -284,6 +289,10 @@ internal static class LauncherSelfTests
             Assert(File.Exists(Path.Combine(legacyInstall.Definition.RootDirectory, "start.cmd")), "Legacy manifest v3 compatibility", lines);
 
             Assert(new LauncherModelCatalog().Models.Count == 0, "Clean model catalog contains no built-in plugins", lines);
+            Assert(GitHubModelImportService.TryNormalizeRepository("https://github.com/SonyResearch/Woosh.git", out var normalizedRepository) && normalizedRepository == "SonyResearch/Woosh", "Full GitHub repository URL normalization", lines);
+            Assert(GitHubModelImportService.TryNormalizeRepository("git@github.com:owner/repository.git", out normalizedRepository) && normalizedRepository == "owner/repository", "GitHub SSH repository normalization", lines);
+            Assert(!GitHubModelImportService.TryNormalizeRepository("https://example.com/owner/repository", out _), "Non-GitHub repository URL rejection", lines);
+            Assert(LauncherForm.TryValidateProxyUrl("http://127.0.0.1:7890", out _) && !LauncherForm.TryValidateProxyUrl("http://user:secret@127.0.0.1:7890", out _), "GitHub proxy URL validation", lines);
             var parsedGpus = SystemResourceProbe.ParseGpuOutput("0, NVIDIA GeForce RTX 4060, 512, 8188\r\n1, NVIDIA GeForce RTX 4090, 1024, 24564\r\n");
             Assert(parsedGpus.Count == 2 && parsedGpus.OrderByDescending(gpu => gpu.TotalMiB).First().Name == "NVIDIA GeForce RTX 4090", "Actual multi-GPU model parsing and primary selection", lines);
             Assert(SystemResourceProbe.FormatGpuUsageGiB(1024, 8188) == "1.00 / 8.00 GiB", "GPU MiB to GiB display formatting", lines);
@@ -299,8 +308,9 @@ internal static class LauncherSelfTests
             {
                 importClient.DefaultRequestHeaders.UserAgent.ParseAdd("BaChen-Self-Test");
                 var importRoot = Path.Combine(testRoot, "github-import-data");
-                var imported = await new GitHubModelImportService(importClient).ImportAsync("example/model-repo", "main", importRoot);
-                Assert(imported.CommitSha == importedCommit && File.Exists(Path.Combine(imported.RootDirectory, "app.py")), "GitHub model import pinned to immutable commit", lines);
+                var imported = await new GitHubModelImportService(importClient).ImportAsync("https://github.com/example/model-repo.git", string.Empty, importRoot);
+                Assert(imported.CommitSha == importedCommit && imported.Branch == "main" && File.Exists(Path.Combine(imported.RootDirectory, "app.py")), "GitHub model import pinned to immutable commit and default branch", lines);
+                Assert(LauncherForm.DetectPythonEntryPoint(imported.RootDirectory) == "app.py", "Python launch entry auto-detection", lines);
                 Assert(File.Exists(Path.Combine(imported.RootDirectory, ".bachen-github-source.json")), "GitHub import provenance metadata", lines);
                 var reused = await new GitHubModelImportService(importClient).ImportAsync("example/model-repo", "main", importRoot);
                 Assert(reused.RootDirectory == imported.RootDirectory, "Verified GitHub source reuse after setup retry", lines);
@@ -422,7 +432,7 @@ internal static class LauncherSelfTests
             LauncherConfigurationStore.SaveAtomic(settingsPath, expectedSettings);
             var loadedSettings = LauncherConfigurationStore.LoadOrCreate(settingsPath, () => new LauncherSettings());
             Assert(loadedSettings.WooshPort == 18001 && File.Exists(settingsPath), "Atomic configuration save and load", lines);
-            Assert(loadedSettings.LauncherUpdateChannel == LauncherUpdateChannel.Preview, "Preview update channel default", lines);
+            Assert(loadedSettings.LauncherUpdateChannel == LauncherUpdateChannel.Stable, "Stable update channel default", lines);
             loadedSettings.LauncherUpdateChannel = LauncherUpdateChannel.Preview;
             LauncherConfigurationStore.SaveAtomic(settingsPath, loadedSettings);
             var previewSettings = LauncherConfigurationStore.LoadOrCreate(settingsPath, () => new LauncherSettings());
@@ -587,6 +597,14 @@ internal static class LauncherSelfTests
     {
         protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
         {
+            if (request.RequestUri?.AbsolutePath.Equals("/repos/example/model-repo", StringComparison.OrdinalIgnoreCase) == true)
+            {
+                return Task.FromResult(new HttpResponseMessage(System.Net.HttpStatusCode.OK)
+                {
+                    RequestMessage = request,
+                    Content = new StringContent("{\"default_branch\":\"main\"}", Encoding.UTF8, "application/json")
+                });
+            }
             if (request.RequestUri?.AbsolutePath.Contains("/commits/", StringComparison.OrdinalIgnoreCase) == true)
             {
                 return Task.FromResult(new HttpResponseMessage(System.Net.HttpStatusCode.OK)
