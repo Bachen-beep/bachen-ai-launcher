@@ -127,6 +127,7 @@ jobs:
         with:
           prerelease: ${{ steps.version.outputs.prerelease }}
           generate_release_notes: true
+          body_path: Docs/ReleaseNotes-0.12.0-stage2-preview.md
           files: |
             artifacts/BaChen.AI.Launcher.exe
             artifacts/installer/BaChen-AI-Launcher-Setup-${{ steps.version.outputs.version }}.exe

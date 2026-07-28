@@ -62,6 +62,8 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File ".\scripts\Build-Install
 
 安装包位于 `artifacts\installer`。安装包只包含启动器、许可证和第三方声明，不包含插件、Python 环境或模型权重。阶段二发布边界与验收标准参见 `Docs/StageTwoReleasePlan.md`，签名配置参见 `Docs/ReleaseSigning.md`。
 
+发布前还应检查 `Docs/CleanMachineTestMatrix.md` 和 `Docs/CodeSigningCertificateChecklist.md`。GitHub 预览版说明位于 `Docs/ReleaseNotes-0.12.0-stage2-preview.md`。
+
 ## 用户数据
 
 - 配置：`%LocalAppData%\BaChen AI Launcher`
