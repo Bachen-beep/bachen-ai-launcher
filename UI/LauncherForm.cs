@@ -768,6 +768,14 @@ internal enum LauncherLogFilter
     CurrentService
 }
 
+internal enum LauncherUpdateChoice
+{
+    Install,
+    Later,
+    Skip,
+    Cancel
+}
+
 internal sealed class LauncherForm : Form
 {
     private static readonly string WindowsPowerShellPath = Path.Combine(
@@ -872,6 +880,7 @@ internal sealed class LauncherForm : Form
         {
             _gpuRefreshTimer.Start();
             await CheckUpdatesInBackgroundAsync();
+            await CheckLauncherUpdateInBackgroundAsync();
         };
         FormClosed += (_, _) =>
         {
@@ -1383,29 +1392,103 @@ internal sealed class LauncherForm : Form
                 MessageBox.Show(L($"当前版本 {check.CurrentVersion.ToString(3)} 已是最新版本。", $"Version {check.CurrentVersion.ToString(3)} is up to date."), L("启动器更新", "Launcher update"), MessageBoxButtons.OK, MessageBoxIcon.Information);
                 return;
             }
-            var confirmation = MessageBox.Show(
-                L($"发现启动器 {check.LatestVersion.ToString(3)}。\n\n更新文件已经过 RSA 签名和 SHA-256 校验，安装前会保留当前 EXE。现在下载并更新吗？", $"Launcher {check.LatestVersion.ToString(3)} is available.\n\nThe update is protected by an RSA signature and SHA-256; the current EXE will be backed up. Download and install now?"),
-                L("发现启动器更新", "Launcher update available"), MessageBoxButtons.YesNo, MessageBoxIcon.Information);
-            if (confirmation != DialogResult.Yes)
+            var choice = ShowLauncherUpdatePrompt(check);
+            if (choice == LauncherUpdateChoice.Skip)
             {
+                _settings.SkippedLauncherVersion = check.LatestVersion.ToString(3);
+                SaveSettings(_settings);
                 return;
             }
-            SetRuntimePhase("正在下载并校验启动器", "Downloading and verifying launcher");
-            var packagePath = await _launcherUpdateService.DownloadVerifiedAsync(check.Manifest);
-            AppendLog(L($"启动器 {check.LatestVersion.ToString(3)} 校验通过，准备重启。", $"Launcher {check.LatestVersion.ToString(3)} verified; preparing to restart."));
-            LauncherSelfUpdateService.BeginApply(packagePath, check.Manifest);
-            Application.Exit();
+            if (choice == LauncherUpdateChoice.Later)
+            {
+                _settings.LauncherUpdateDeferredUntil = DateTimeOffset.Now.AddHours(24);
+                SaveSettings(_settings);
+                return;
+            }
+            if (choice != LauncherUpdateChoice.Install) return;
+            await InstallLauncherUpdateAsync(check);
         }
         catch (Exception ex)
         {
-            AppendLog(L($"启动器更新失败：{ex.Message}", $"Launcher update failed: {ex.Message}"), null, true);
-            MessageBox.Show(ex.Message, L("启动器更新失败", "Launcher update failed"), MessageBoxButtons.OK, MessageBoxIcon.Error);
+            var message = DescribeLauncherUpdateError(ex);
+            AppendLog(L($"启动器更新失败：{message}", $"Launcher update failed: {message}"), null, true);
+            MessageBox.Show(message, L("启动器更新失败", "Launcher update failed"), MessageBoxButtons.OK, MessageBoxIcon.Error);
         }
         finally
         {
             _updateBusy = false;
             SetRuntimePhase("启动器更新检查完成", "Launcher update check complete");
         }
+    }
+
+    private async Task CheckLauncherUpdateInBackgroundAsync()
+    {
+        if (!_settings.AutomaticallyCheckLauncherUpdates || _updateBusy ||
+            _settings.LauncherUpdateDeferredUntil > DateTimeOffset.Now) return;
+        _updateBusy = true;
+        try
+        {
+            var check = await _launcherUpdateService.CheckAsync();
+            if (!check.IsUpdateAvailable || _settings.SkippedLauncherVersion == check.LatestVersion.ToString(3)) return;
+            var choice = ShowLauncherUpdatePrompt(check);
+            if (choice == LauncherUpdateChoice.Install)
+            {
+                await InstallLauncherUpdateAsync(check);
+            }
+            else if (choice == LauncherUpdateChoice.Later)
+            {
+                _settings.LauncherUpdateDeferredUntil = DateTimeOffset.Now.AddHours(24);
+                SaveSettings(_settings);
+            }
+            else if (choice == LauncherUpdateChoice.Skip)
+            {
+                _settings.SkippedLauncherVersion = check.LatestVersion.ToString(3);
+                SaveSettings(_settings);
+            }
+        }
+        catch (Exception ex)
+        {
+            AppendLog(L($"自动更新检查跳过：{DescribeLauncherUpdateError(ex)}", $"Automatic update check skipped: {DescribeLauncherUpdateError(ex)}"));
+        }
+        finally
+        {
+            _updateBusy = false;
+        }
+    }
+
+    private async Task InstallLauncherUpdateAsync(LauncherUpdateCheck check)
+    {
+            SetRuntimePhase("正在下载并校验启动器", "Downloading and verifying launcher");
+            var packagePath = await _launcherUpdateService.DownloadVerifiedAsync(check.Manifest);
+            AppendLog(L($"启动器 {check.LatestVersion.ToString(3)} 校验通过，准备重启。", $"Launcher {check.LatestVersion.ToString(3)} verified; preparing to restart."));
+            LauncherSelfUpdateService.BeginApply(packagePath, check.Manifest);
+            Application.Exit();
+    }
+
+    private LauncherUpdateChoice ShowLauncherUpdatePrompt(LauncherUpdateCheck check)
+    {
+        using var dialog = new Form { Text = L("发现启动器更新", "Launcher update available"), StartPosition = FormStartPosition.CenterParent, FormBorderStyle = FormBorderStyle.FixedDialog, ClientSize = new Size(680, 250), MaximizeBox = false, MinimizeBox = false, ShowInTaskbar = false, BackColor = Theme.Card, Font = new Font("Microsoft YaHei UI", 10F) };
+        var message = new Label { Text = L($"发现版本 {check.LatestVersion.ToString(3)}。更新清单和文件将经过签名与哈希校验，并保留当前版本用于回滚。", $"Version {check.LatestVersion.ToString(3)} is available. The manifest and file will be verified, and the current version will be kept for rollback."), Location = new Point(26, 24), Size = new Size(628, 76), ForeColor = Theme.Ink };
+        var notes = new LinkLabel { Text = L("查看发布说明", "View release notes"), Location = new Point(26, 112), Size = new Size(180, 30), LinkColor = Theme.MidTeal };
+        notes.Click += (_, _) => Process.Start(new ProcessStartInfo(check.Manifest.ReleaseNotesUrl) { UseShellExecute = true });
+        var result = LauncherUpdateChoice.Cancel;
+        var install = new Button { Text = L("立即更新", "Install now"), Location = new Point(190, 176), Size = new Size(140, 40) };
+        var later = new Button { Text = L("24 小时后提醒", "Remind in 24h"), Location = new Point(340, 176), Size = new Size(140, 40) };
+        var skip = new Button { Text = L("跳过此版本", "Skip version"), Location = new Point(490, 176), Size = new Size(140, 40) };
+        install.Click += (_, _) => { result = LauncherUpdateChoice.Install; dialog.Close(); };
+        later.Click += (_, _) => { result = LauncherUpdateChoice.Later; dialog.Close(); };
+        skip.Click += (_, _) => { result = LauncherUpdateChoice.Skip; dialog.Close(); };
+        dialog.Controls.AddRange([message, notes, install, later, skip]);
+        dialog.ShowDialog(this);
+        return result;
+    }
+
+    private string DescribeLauncherUpdateError(Exception exception)
+    {
+        if (exception is TaskCanceledException) return L("网络请求超时，请稍后重试。", "The network request timed out. Try again later.");
+        if (exception is HttpRequestException) return L("无法连接 GitHub 更新服务，请检查网络或代理设置。", "GitHub update services could not be reached. Check the network or proxy.");
+        if (exception is IOException && exception.Message.Contains("disk space", StringComparison.OrdinalIgnoreCase)) return L("磁盘空间不足，无法安全下载更新。", "There is not enough disk space to download the update safely.");
+        return exception.Message;
     }
 
     private async Task RollbackLauncherAsync()
@@ -1787,7 +1870,7 @@ internal sealed class LauncherForm : Form
             Text = L("启动器设置", "Launcher settings"),
             StartPosition = FormStartPosition.CenterParent,
             FormBorderStyle = FormBorderStyle.FixedDialog,
-            ClientSize = new Size(940, 570),
+            ClientSize = new Size(940, 620),
             MaximizeBox = false,
             MinimizeBox = false,
             ShowInTaskbar = false,
@@ -1840,17 +1923,28 @@ internal sealed class LauncherForm : Form
         };
         dialog.Controls.Add(table);
 
+        var automaticUpdates = new CheckBox
+        {
+            Text = L("启动时自动检查启动器更新", "Automatically check launcher updates at startup"),
+            Checked = _settings.AutomaticallyCheckLauncherUpdates,
+            Location = new Point(28, 442),
+            Size = new Size(520, 32),
+            ForeColor = Theme.Ink,
+            BackColor = Theme.Card
+        };
+        dialog.Controls.Add(automaticUpdates);
+
         var note = new Label
         {
             AutoSize = false,
             Text = L("保存只会更新路径，不会移动现有插件或模型文件。", "Saving updates paths only; existing plugins and model files are not moved."),
             ForeColor = Theme.Muted,
-            Location = new Point(28, 446),
+            Location = new Point(28, 480),
             Size = new Size(750, 48)
         };
         dialog.Controls.Add(note);
-        var cancel = new Button { Text = L("取消", "Cancel"), DialogResult = DialogResult.Cancel, Size = new Size(110, 38), Location = new Point(682, 512) };
-        var save = new Button { Text = L("保存", "Save"), DialogResult = DialogResult.OK, Size = new Size(110, 38), Location = new Point(806, 512) };
+        var cancel = new Button { Text = L("取消", "Cancel"), DialogResult = DialogResult.Cancel, Size = new Size(110, 38), Location = new Point(682, 558) };
+        var save = new Button { Text = L("保存", "Save"), DialogResult = DialogResult.OK, Size = new Size(110, 38), Location = new Point(806, 558) };
         dialog.Controls.Add(cancel);
         dialog.Controls.Add(save);
         dialog.AcceptButton = save;
@@ -1871,6 +1965,9 @@ internal sealed class LauncherForm : Form
             WooshPort = (int)wooshPort.Value,
             StablePort = (int)stablePort.Value,
             IndexTtsPort = (int)indexPort.Value
+            ,AutomaticallyCheckLauncherUpdates = automaticUpdates.Checked
+            ,SkippedLauncherVersion = _settings.SkippedLauncherVersion
+            ,LauncherUpdateDeferredUntil = _settings.LauncherUpdateDeferredUntil
         };
         var builtInPorts = new[] { updated.WooshPort, updated.StablePort, updated.IndexTtsPort };
         if (builtInPorts.Distinct().Count() != builtInPorts.Length)

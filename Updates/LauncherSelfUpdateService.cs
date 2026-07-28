@@ -35,7 +35,16 @@ internal sealed class LauncherSelfUpdateService(HttpClient client)
         var updateRoot = Path.Combine(Path.GetTempPath(), "bachen-launcher-update-" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(updateRoot);
         var packagePath = Path.Combine(updateRoot, "BaChen AI Launcher.exe");
-        await using (var input = await client.GetStreamAsync(manifest.DownloadUrl))
+        using var response = await client.GetAsync(manifest.DownloadUrl, HttpCompletionOption.ResponseHeadersRead);
+        response.EnsureSuccessStatusCode();
+        var requiredBytes = response.Content.Headers.ContentLength ?? 150L * 1024 * 1024;
+        var drive = new DriveInfo(Path.GetPathRoot(updateRoot)!);
+        if (drive.AvailableFreeSpace < requiredBytes + 100L * 1024 * 1024)
+        {
+            Directory.Delete(updateRoot, true);
+            throw new IOException($"Insufficient disk space. At least {(requiredBytes + 100L * 1024 * 1024) / 1024 / 1024} MiB must be available.");
+        }
+        await using (var input = await response.Content.ReadAsStreamAsync())
         await using (var output = File.Create(packagePath))
         {
             await input.CopyToAsync(output);

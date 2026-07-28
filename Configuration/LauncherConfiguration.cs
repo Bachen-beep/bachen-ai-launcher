@@ -48,6 +48,9 @@ internal sealed class LauncherSettings
     public int WooshPort { get; set; } = 7860;
     public int StablePort { get; set; } = 7861;
     public int IndexTtsPort { get; set; } = 7862;
+    public bool AutomaticallyCheckLauncherUpdates { get; set; } = true;
+    public string SkippedLauncherVersion { get; set; } = string.Empty;
+    public DateTimeOffset? LauncherUpdateDeferredUntil { get; set; }
 }
 
 internal sealed class LauncherModelCatalog
