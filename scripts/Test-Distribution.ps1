@@ -16,9 +16,12 @@ $installer = (Resolve-Path -LiteralPath $InstallerPath).Path
 $report = [Collections.Generic.List[string]]::new()
 $unicodePathSegment = ([char]0x9A8C).ToString() + [char]0x6536
 $testRoot = Join-Path ([IO.Path]::GetTempPath()) ("BaChen Stage2 $unicodePathSegment " + [Guid]::NewGuid().ToString("N"))
-$installRoot = Join-Path $testRoot "程序 文件"
-$configRoot = Join-Path $testRoot "用户 配置"
-$dataRoot = Join-Path $testRoot "插件 数据"
+$programPathSegment = ([char]0x7A0B).ToString() + [char]0x5E8F + " " + [char]0x6587 + [char]0x4EF6
+$configPathSegment = ([char]0x7528).ToString() + [char]0x6237 + " " + [char]0x914D + [char]0x7F6E
+$dataPathSegment = ([char]0x63D2).ToString() + [char]0x4EF6 + " " + [char]0x6570 + [char]0x636E
+$installRoot = Join-Path $testRoot $programPathSegment
+$configRoot = Join-Path $testRoot $configPathSegment
+$dataRoot = Join-Path $testRoot $dataPathSegment
 $selfTestReport = Join-Path $testRoot "standalone-self-test.txt"
 $installedSelfTestReport = Join-Path $testRoot "installed-self-test.txt"
 $previousConfig = $env:BACHEN_AI_CONFIG_DIR
@@ -70,7 +73,8 @@ try {
     if (-not (Select-String -LiteralPath $selfTestReport -SimpleMatch "SELF TEST PASSED" -Quiet)) {
         throw "Standalone self-test report does not contain the success marker."
     }
-    $report.Add("SELF_TEST_COUNT: $(@(Select-String -LiteralPath $selfTestReport -Pattern '^PASS:').Count)")
+    $selfTestCount = @(Select-String -LiteralPath $selfTestReport -Pattern "^PASS:").Count
+    $report.Add("SELF_TEST_COUNT: $selfTestCount")
     Test-UiStartup $launcher "Isolated standalone UI startup"
 
     $installArguments = "/VERYSILENT /SUPPRESSMSGBOXES /NORESTART /SP- /DIR=`"$installRoot`""
