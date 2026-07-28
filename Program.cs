@@ -925,7 +925,11 @@ internal sealed class LauncherForm : Form
     private SafeTextLabel? _detailPortLabel;
     private SafeTextLabel? _detailMemoryLabel;
     private SafeTextLabel? _logSummaryLabel;
+    private SafeTextLabel? _pluginCountLabel;
     private FlowLayoutPanel? _stableModePanel;
+    private FlowLayoutPanel? _pluginList;
+    private TextBox? _pluginSearchBox;
+    private ComboBox? _pluginCategoryFilter;
     private Panel? _logHost;
     private GpuMeter? _gpuMeter;
     private List<PluginUiEntry> _pluginEntries = [];
@@ -938,6 +942,8 @@ internal sealed class LauncherForm : Form
     private string _phaseChinese = "未启动服务";
     private string _phaseEnglish = "No service started";
     private LauncherLogFilter _logFilter = LauncherLogFilter.All;
+    private string _pluginSearchQuery = string.Empty;
+    private string _pluginCategory = "*";
 
     private ServiceProfile _woosh = null!;
     private ServiceProfile _smallSfx = null!;
@@ -1108,6 +1114,7 @@ internal sealed class LauncherForm : Form
     private void ToggleLanguage()
     {
         _useEnglish = !_useEnglish;
+        _pluginCategory = "*";
         Controls.Clear();
         InitializeUi();
         _openButton.Enabled = _activeService is not null;
@@ -2552,11 +2559,52 @@ internal sealed class LauncherForm : Form
         };
         pluginPanel.Controls.Add(CreateText(L("已安装插件", "Installed plugins"), new Rectangle(24, 18, 250, 34), 14F, Theme.Ink, FontStyle.Bold));
         _pluginEntries = BuildPluginEntries();
-        pluginPanel.Controls.Add(CreateText(L($"{_pluginEntries.Count} 个本地插件", $"{_pluginEntries.Count} local plugins"), new Rectangle(26, 52, 220, 24), 8.5F, Theme.Muted, FontStyle.Regular));
-        var pluginList = new FlowLayoutPanel
+        _pluginCountLabel = CreateText(string.Empty, new Rectangle(26, 52, 340, 24), 8.5F, Theme.Muted, FontStyle.Regular);
+        pluginPanel.Controls.Add(_pluginCountLabel);
+
+        _pluginSearchBox = new TextBox
         {
-            Location = new Point(18, 88),
-            Size = new Size(370, 500),
+            Location = new Point(24, 82),
+            Size = new Size(362, 34),
+            Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right,
+            BorderStyle = BorderStyle.FixedSingle,
+            Font = new Font("Microsoft YaHei UI", 9.5F),
+            PlaceholderText = L("搜索名称、说明或分类", "Search name, description, or category"),
+            Text = _pluginSearchQuery
+        };
+        _pluginSearchBox.TextChanged += (_, _) =>
+        {
+            _pluginSearchQuery = _pluginSearchBox.Text.Trim();
+            RebuildPluginList();
+        };
+        pluginPanel.Controls.Add(_pluginSearchBox);
+
+        _pluginCategoryFilter = new ComboBox
+        {
+            Location = new Point(24, 124),
+            Size = new Size(362, 34),
+            Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right,
+            DropDownStyle = ComboBoxStyle.DropDownList,
+            FlatStyle = FlatStyle.Flat,
+            Font = new Font("Microsoft YaHei UI", 9F)
+        };
+        _pluginCategoryFilter.Items.Add(L("全部分类", "All categories"));
+        foreach (var category in _pluginEntries.Select(entry => entry.Category).Distinct(StringComparer.OrdinalIgnoreCase).OrderBy(value => value))
+        {
+            _pluginCategoryFilter.Items.Add(category);
+        }
+        _pluginCategoryFilter.SelectedIndex = 0;
+        _pluginCategoryFilter.SelectedIndexChanged += (_, _) =>
+        {
+            _pluginCategory = _pluginCategoryFilter.SelectedIndex <= 0 ? "*" : _pluginCategoryFilter.SelectedItem?.ToString() ?? "*";
+            RebuildPluginList();
+        };
+        pluginPanel.Controls.Add(_pluginCategoryFilter);
+
+        _pluginList = new FlowLayoutPanel
+        {
+            Location = new Point(18, 170),
+            Size = new Size(370, 418),
             Anchor = AnchorStyles.Top | AnchorStyles.Bottom | AnchorStyles.Left | AnchorStyles.Right,
             AutoScroll = true,
             FlowDirection = FlowDirection.TopDown,
@@ -2564,30 +2612,15 @@ internal sealed class LauncherForm : Form
             BackColor = Color.White,
             Padding = new Padding(0)
         };
-        foreach (var entry in _pluginEntries)
+        _pluginList.SizeChanged += (_, _) =>
         {
-            var capturedId = entry.Id;
-            var item = new PluginListItem
+            foreach (var item in _pluginList.Controls.OfType<PluginListItem>())
             {
-                Width = 350,
-                Height = 94,
-                Margin = new Padding(0, 0, 0, 10),
-                TitleText = entry.Title,
-                CategoryText = entry.Category.ToUpperInvariant(),
-                AccentColor = entry.Accent,
-                InvokeAction = () => SelectPlugin(capturedId)
-            };
-            _pluginItems[entry.Id] = item;
-            pluginList.Controls.Add(item);
-        }
-        pluginList.SizeChanged += (_, _) =>
-        {
-            foreach (var item in pluginList.Controls.OfType<PluginListItem>())
-            {
-                item.Width = Math.Max(260, pluginList.ClientSize.Width - (pluginList.VerticalScroll.Visible ? 22 : 4));
+                item.Width = Math.Max(260, _pluginList.ClientSize.Width - (_pluginList.VerticalScroll.Visible ? 22 : 4));
             }
         };
-        pluginPanel.Controls.Add(pluginList);
+        pluginPanel.Controls.Add(_pluginList);
+        RebuildPluginList();
         mainShell.Controls.Add(pluginPanel, 1, 0);
 
         var detailPanel = new RoundedPanel
@@ -2677,6 +2710,70 @@ internal sealed class LauncherForm : Form
             definition.RecommendedVramMiB,
             CategoryAccent(definition.Category))));
         return entries;
+    }
+
+    private void RebuildPluginList()
+    {
+        if (_pluginList is null || _pluginList.IsDisposed)
+        {
+            return;
+        }
+
+        _pluginItems.Clear();
+        _pluginList.SuspendLayout();
+        _pluginList.Controls.Clear();
+        var visibleEntries = _pluginEntries.Where(entry =>
+        {
+            var matchesCategory = _pluginCategory == "*" || entry.Category.Equals(_pluginCategory, StringComparison.OrdinalIgnoreCase);
+            var matchesSearch = string.IsNullOrWhiteSpace(_pluginSearchQuery) ||
+                entry.Title.Contains(_pluginSearchQuery, StringComparison.OrdinalIgnoreCase) ||
+                entry.Description.Contains(_pluginSearchQuery, StringComparison.OrdinalIgnoreCase) ||
+                entry.Category.Contains(_pluginSearchQuery, StringComparison.OrdinalIgnoreCase);
+            return matchesCategory && matchesSearch;
+        }).ToList();
+
+        foreach (var entry in visibleEntries)
+        {
+            var capturedId = entry.Id;
+            var item = new PluginListItem
+            {
+                Width = Math.Max(260, _pluginList.ClientSize.Width - 4),
+                Height = 94,
+                Margin = new Padding(0, 0, 0, 10),
+                TitleText = entry.Title,
+                CategoryText = entry.Category.ToUpperInvariant(),
+                AccentColor = entry.Accent,
+                IsSelected = entry.Id.Equals(_selectedPluginId, StringComparison.OrdinalIgnoreCase),
+                InvokeAction = () => SelectPlugin(capturedId)
+            };
+            _pluginItems[entry.Id] = item;
+            _pluginList.Controls.Add(item);
+        }
+
+        if (visibleEntries.Count == 0)
+        {
+            _pluginList.Controls.Add(new Label
+            {
+                AutoSize = false,
+                Width = Math.Max(260, _pluginList.ClientSize.Width - 12),
+                Height = 86,
+                Text = L("没有符合当前条件的插件。", "No plugins match the current filters."),
+                TextAlign = ContentAlignment.MiddleCenter,
+                ForeColor = Theme.Muted,
+                Font = new Font("Microsoft YaHei UI", 9F)
+            });
+        }
+
+        if (_pluginCountLabel is not null)
+        {
+            _pluginCountLabel.Text = L($"显示 {visibleEntries.Count} / {_pluginEntries.Count} 个插件", $"Showing {visibleEntries.Count} of {_pluginEntries.Count} plugins");
+        }
+        _pluginList.ResumeLayout();
+
+        if (visibleEntries.Count > 0 && visibleEntries.All(entry => !entry.Id.Equals(_selectedPluginId, StringComparison.OrdinalIgnoreCase)))
+        {
+            SelectPlugin(visibleEntries[0].Id);
+        }
     }
 
     private void SelectPlugin(string id)
