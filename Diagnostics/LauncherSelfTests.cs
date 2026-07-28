@@ -118,6 +118,20 @@ internal static class LauncherSelfTests
                     lines);
             }
             Assert(File.ReadAllText(offlineDataPath, Encoding.ASCII) == "preserve", "Offline failure preserves plugin data", lines);
+            using (var proxyHandler = new HttpClientHandler
+            {
+                Proxy = new System.Net.WebProxy("http://127.0.0.1:1"),
+                UseProxy = true
+            })
+            using (var proxyClient = new HttpClient(proxyHandler) { Timeout = TimeSpan.FromSeconds(3) })
+            {
+                var proxyService = new LauncherSelfUpdateService(proxyClient);
+                await AssertThrowsAsync(
+                    () => proxyService.CheckAsync(LauncherUpdateChannel.Stable),
+                    "Proxy-restricted update failure isolation",
+                    lines);
+            }
+            Assert(File.ReadAllText(offlineDataPath, Encoding.ASCII) == "preserve", "Proxy failure preserves plugin data", lines);
 
             var interruptedRoot = Path.Combine(testRoot, "interrupted-download");
             using (var interruptedClient = new HttpClient(new FailureHandler(new IOException("simulated interrupted download"))))

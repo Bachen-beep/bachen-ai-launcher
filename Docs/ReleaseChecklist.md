@@ -28,6 +28,8 @@
   model unless that test explicitly requires one.
 - Run `scripts/Test-Distribution.ps1` against the final launcher and installer;
   retain its report with the release evidence.
+- Run `scripts/Test-StandardUserDistribution.ps1` from an elevated qualification
+  host; verify that the retained report records `administrator=False`.
 
 ## Promotion
 

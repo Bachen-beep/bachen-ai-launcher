@@ -128,12 +128,33 @@ jobs:
         shell: pwsh
         run: |
           $version = "${{ steps.version.outputs.version }}"
-          $report = Join-Path $env:RUNNER_TEMP "distribution-test.txt"
+          $evidenceRoot = Join-Path $PWD "artifacts\test-evidence"
+          New-Item -ItemType Directory -Path $evidenceRoot -Force | Out-Null
+          $report = Join-Path $evidenceRoot "distribution-test.txt"
           .\scripts\Test-Distribution.ps1 `
             -LauncherPath ".\artifacts\BaChen.AI.Launcher.exe" `
             -InstallerPath ".\artifacts\installer\BaChen-AI-Launcher-Setup-$version.exe" `
             -ReportPath $report
           Get-Content $report
+
+      - name: Test standard user with Unicode username
+        shell: powershell
+        run: |
+          $version = "${{ steps.version.outputs.version }}"
+          $report = Join-Path $PWD "artifacts\test-evidence\standard-user-distribution-test.txt"
+          .\scripts\Test-StandardUserDistribution.ps1 `
+            -LauncherPath ".\artifacts\BaChen.AI.Launcher.exe" `
+            -InstallerPath ".\artifacts\installer\BaChen-AI-Launcher-Setup-$version.exe" `
+            -ReportPath $report
+          Get-Content $report
+
+      - name: Retain qualification evidence
+        uses: actions/upload-artifact@v7
+        with:
+          name: stage-two-qualification-${{ steps.version.outputs.version }}
+          path: artifacts/test-evidence/*.txt
+          if-no-files-found: error
+          retention-days: 90
 
       - name: Generate SPDX SBOM
         uses: anchore/sbom-action@v0.24.0
