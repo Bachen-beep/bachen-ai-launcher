@@ -36,3 +36,6 @@
 - Preview validates the distribution workflow and preview update channel.
 - Release candidate requires the complete clean-machine matrix.
 - Stable requires successful candidate evidence and no unresolved release blocker.
+- Stage Two engineering closeout and production promotion are tracked separately
+  in `StageTwoCloseout.md`; engineering completion must not be used to bypass the
+  clean-client release gate.
