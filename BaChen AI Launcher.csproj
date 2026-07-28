@@ -27,5 +27,7 @@
   </PropertyGroup>
   <ItemGroup>
     <EmbeddedResource Include="Security\launcher-update-public.pem" LogicalName="BaChenAiLauncher.UpdatePublicKey" />
+    <EmbeddedResource Include="Security\plugin-index-public.pem" LogicalName="BaChenAiLauncher.PluginIndexPublicKey" />
+    <EmbeddedResource Include="Catalog\plugin-index.json" LogicalName="BaChenAiLauncher.BundledPluginIndex" />
   </ItemGroup>
 </Project>

@@ -45,6 +45,7 @@ internal static class LauncherSelfTests
             using var rsa = RSA.Create(2048);
             var manifest = new PluginPackageManifest
             {
+                SchemaVersion = 5,
                 Id = "self-test-plugin",
                 DisplayName = "Self Test Plugin",
                 Version = "1.0.0",
@@ -182,6 +183,72 @@ internal static class LauncherSelfTests
             manifest.Description += " tampered";
             Assert(!PluginManifestSignatureVerifier.Verify(manifest, publishers).IsTrusted, "Manifest tamper detection", lines);
             manifest.Description = "Installer verification fixture";
+
+            using (var offlineCatalogClient = new HttpClient(new FailureHandler(new HttpRequestException("simulated offline catalog"))))
+            {
+                var signedCatalog = await new PluginCatalogService(offlineCatalogClient).LoadAsync();
+                Assert(signedCatalog.Plugins.Count > 0 && signedCatalog.Plugins.All(plugin => plugin.SchemaVersion == 6), "Bundled signed plugin catalog fallback", lines);
+                var catalogPlugin = signedCatalog.Plugins[0];
+                var catalogInstallRoot = Path.Combine(testRoot, "signed-catalog-plugin");
+                Directory.CreateDirectory(catalogInstallRoot);
+                await File.WriteAllTextAsync(
+                    Path.Combine(catalogInstallRoot, ".bachen-plugin-manifest.json"),
+                    System.Text.Json.JsonSerializer.Serialize(catalogPlugin, new System.Text.Json.JsonSerializerOptions { PropertyNamingPolicy = System.Text.Json.JsonNamingPolicy.CamelCase }),
+                    Encoding.UTF8);
+                PluginCatalogIndexVerifier.WriteInstalledCopy(signedCatalog, catalogInstallRoot);
+                var catalogDefinition = DefinitionFromManifestForSelfTest(catalogPlugin, catalogInstallRoot);
+                Assert(InstalledPluginTrustValidator.Verify(catalogDefinition, publishers).IsTrusted, "Installed signed catalog trust verification", lines);
+                catalogDefinition.Arguments += " --tampered";
+                Assert(!InstalledPluginTrustValidator.Verify(catalogDefinition, publishers).IsTrusted, "Signed catalog command tamper detection", lines);
+                catalogDefinition.Arguments = catalogPlugin.Arguments;
+                signedCatalog.Plugins[0].Description += " tampered";
+                AssertThrows(() => PluginCatalogIndexVerifier.Validate(signedCatalog), "Plugin catalog signature tamper detection", lines);
+            }
+
+            var assetSource = Path.Combine(testRoot, "asset-source");
+            Directory.CreateDirectory(Path.Combine(assetSource, "tiny-model"));
+            await File.WriteAllTextAsync(Path.Combine(assetSource, "tiny-model", "model.bin"), "model-asset", Encoding.ASCII);
+            var assetPackagePath = Path.Combine(testRoot, "tiny-model.zip");
+            ZipFile.CreateFromDirectory(assetSource, assetPackagePath);
+            var assetBytes = await File.ReadAllBytesAsync(assetPackagePath);
+            var assetHash = Convert.ToHexString(SHA256.HashData(assetBytes));
+            var versionSixManifest = CloneManifest(manifest);
+            versionSixManifest.SchemaVersion = 6;
+            versionSixManifest.Id = "version-six-plugin";
+            versionSixManifest.CreateVirtualEnvironment = false;
+            versionSixManifest.ManagedRuntimeId = string.Empty;
+            versionSixManifest.PythonInstallArguments = [];
+            versionSixManifest.RequiredFiles = ["start.cmd", "models/tiny-model/model.bin"];
+            versionSixManifest.Dependencies = ["file:models/tiny-model/model.bin"];
+            versionSixManifest.AssetPackages =
+            [
+                new PluginAssetPackage
+                {
+                    Id = "tiny-model",
+                    Url = "https://example.com/tiny-model.zip",
+                    Sha256 = assetHash,
+                    SizeBytes = assetBytes.Length,
+                    DestinationPath = "models"
+                }
+            ];
+            ResignManifest(versionSixManifest, rsa);
+            Assert(PluginManifestSignatureVerifier.Verify(versionSixManifest, publishers).IsTrusted, "Manifest v6 signature verification", lines);
+            versionSixManifest.AssetPackages[0].DestinationPath = "tampered-models";
+            Assert(!PluginManifestSignatureVerifier.Verify(versionSixManifest, publishers).IsTrusted, "Manifest v6 asset tamper detection", lines);
+            versionSixManifest.AssetPackages[0].DestinationPath = "models";
+            ResignManifest(versionSixManifest, rsa);
+            using (var assetClient = new HttpClient(new StaticBytesHandler(assetBytes)))
+            {
+                var versionSixDataRoot = Path.Combine(testRoot, "version-six-data");
+                var versionSixInstall = await new PluginPackageService(assetClient).InstallAsync(versionSixManifest, packagePath, versionSixDataRoot);
+                Assert(File.Exists(Path.Combine(versionSixInstall.Definition.RootDirectory, "models", "tiny-model", "model.bin")), "Manifest v6 verified asset extraction", lines);
+                var preflight = PluginInstallPreflightService.Assess(versionSixManifest, versionSixDataRoot, () => (0, 8192));
+                Assert(preflight.RequiredDiskBytes >= (versionSixManifest.PackageSizeBytes + assetBytes.Length) * 2, "Asset packages included in disk preflight", lines);
+            }
+            Assert(ManagedPythonRuntimeService.Python312.Id == "python-3.12.10-x64" &&
+                ManagedPythonRuntimeService.Python312.SizeBytes == 26964224 &&
+                ManagedPythonRuntimeService.Python312.Sha256 == "67B5635E80EA51072B87941312D00EC8927C4DB9BA18938F7AD2D27B328B95FB",
+                "Managed Python runtime is pinned by version size and SHA-256", lines);
 
             using var client = new HttpClient();
             var packageService = new PluginPackageService(client);
@@ -350,6 +417,13 @@ internal static class LauncherSelfTests
             LauncherConfigurationStore.SaveAtomic(settingsPath, loadedSettings);
             var previewSettings = LauncherConfigurationStore.LoadOrCreate(settingsPath, () => new LauncherSettings());
             Assert(previewSettings.LauncherUpdateChannel == LauncherUpdateChannel.Preview, "Preview update channel persistence", lines);
+            Assert(previewSettings.FirstRunCompleted, "Existing-user first-run migration default", lines);
+            previewSettings.FirstRunCompleted = false;
+            previewSettings.FirstRunWizardStep = 3;
+            previewSettings.FirstRunSelectedPluginIds = ["woosh-dflow"];
+            LauncherConfigurationStore.SaveAtomic(settingsPath, previewSettings);
+            var firstRunSettings = LauncherConfigurationStore.LoadOrCreate(settingsPath, () => new LauncherSettings());
+            Assert(!firstRunSettings.FirstRunCompleted && firstRunSettings.FirstRunWizardStep == 3 && firstRunSettings.FirstRunSelectedPluginIds.SequenceEqual(["woosh-dflow"]), "First-run wizard state persistence", lines);
             await File.WriteAllTextAsync(settingsPath, "{ invalid json", Encoding.UTF8);
             _ = LauncherConfigurationStore.LoadOrCreate(settingsPath, () => new LauncherSettings());
             Assert(Directory.EnumerateFiles(Path.Combine(Path.GetDirectoryName(settingsPath)!, "backups", "corrupt-config")).Any(), "Corrupt configuration archival", lines);
@@ -387,6 +461,26 @@ internal static class LauncherSelfTests
 
     private static ServiceProfile ToServiceProfileForSelfTest(this LauncherModelDefinition definition)
         => new(definition.DisplayName, definition.Description, definition.RootDirectory, Path.Combine(definition.RootDirectory, definition.Executable), definition.Arguments, definition.Port, definition.IsHighVram, definition.RequiredFiles, 0, 0, definition.Dependencies);
+
+    private static LauncherModelDefinition DefinitionFromManifestForSelfTest(PluginPackageManifest manifest, string root)
+        => new()
+        {
+            Id = manifest.Id,
+            DisplayName = manifest.DisplayName,
+            RootDirectory = root,
+            Executable = manifest.Executable,
+            Arguments = manifest.Arguments,
+            Runtime = manifest.Runtime,
+            RuntimeVersion = manifest.RuntimeVersion,
+            Port = manifest.Port,
+            RequiredFiles = manifest.RequiredFiles,
+            Dependencies = manifest.Dependencies,
+            PackageSha256 = manifest.PackageSha256,
+            PackageSizeBytes = manifest.PackageSizeBytes,
+            PreservedPaths = manifest.PreservedPaths,
+            TrustSource = "SignedCatalog",
+            SigningKeyId = "bachen-plugin-index-2026"
+        };
 
     private static PluginPackageManifest CloneManifest(PluginPackageManifest manifest)
         => System.Text.Json.JsonSerializer.Deserialize<PluginPackageManifest>(
@@ -467,6 +561,15 @@ internal static class LauncherSelfTests
             => Task.FromResult(new HttpResponseMessage(System.Net.HttpStatusCode.OK)
             {
                 Content = new StringContent(json, Encoding.UTF8, "application/json")
+            });
+    }
+
+    private sealed class StaticBytesHandler(byte[] bytes) : HttpMessageHandler
+    {
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+            => Task.FromResult(new HttpResponseMessage(System.Net.HttpStatusCode.OK)
+            {
+                Content = new ByteArrayContent(bytes)
             });
     }
 

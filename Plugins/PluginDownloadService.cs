@@ -10,6 +10,14 @@ internal sealed record PluginDownloadProgress(long BytesReceived, long? TotalByt
     public int Percentage => TotalBytes is > 0 ? (int)Math.Clamp(BytesReceived * 100L / TotalBytes.Value, 0, 100) : 0;
 }
 
+internal sealed record VerifiedDownloadRequest(
+    string CacheKey,
+    string Url,
+    string[] Mirrors,
+    string Sha256,
+    long SizeBytes,
+    string FileExtension = ".zip");
+
 internal sealed class PluginDownloadService(HttpClient httpClient)
 {
     public async Task<string> DownloadAsync(
@@ -17,21 +25,45 @@ internal sealed class PluginDownloadService(HttpClient httpClient)
         string dataRoot,
         IProgress<PluginDownloadProgress>? progress = null,
         CancellationToken cancellationToken = default)
+        => await DownloadAsync(
+            new VerifiedDownloadRequest($"{manifest.Id}-{manifest.Version}", manifest.PackageUrl, manifest.PackageMirrors ?? [], manifest.PackageSha256, manifest.PackageSizeBytes),
+            dataRoot,
+            progress,
+            cancellationToken);
+
+    public async Task<string> DownloadAssetAsync(
+        string pluginId,
+        PluginAssetPackage asset,
+        string dataRoot,
+        IProgress<PluginDownloadProgress>? progress = null,
+        CancellationToken cancellationToken = default)
+        => await DownloadAsync(
+            new VerifiedDownloadRequest($"{pluginId}-{asset.Id}", asset.Url, asset.Mirrors ?? [], asset.Sha256, asset.SizeBytes),
+            dataRoot,
+            progress,
+            cancellationToken);
+
+    public async Task<string> DownloadAsync(
+        VerifiedDownloadRequest request,
+        string dataRoot,
+        IProgress<PluginDownloadProgress>? progress = null,
+        CancellationToken cancellationToken = default)
     {
         var downloadsRoot = Path.GetFullPath(Path.Combine(dataRoot, "downloads"));
         Directory.CreateDirectory(downloadsRoot);
-        var destination = Path.Combine(downloadsRoot, $"{SafeFileName(manifest.Id)}-{SafeFileName(manifest.Version)}.zip");
-        if (File.Exists(destination) && (manifest.PackageSizeBytes <= 0 || new FileInfo(destination).Length == manifest.PackageSizeBytes))
+        var extension = request.FileExtension.StartsWith('.') ? request.FileExtension : "." + request.FileExtension;
+        var destination = Path.Combine(downloadsRoot, SafeFileName(request.CacheKey) + extension);
+        if (File.Exists(destination) && (request.SizeBytes <= 0 || new FileInfo(destination).Length == request.SizeBytes))
         {
-            if (await HasExpectedHashAsync(destination, manifest.PackageSha256, cancellationToken))
+            if (await HasExpectedHashAsync(destination, request.Sha256, cancellationToken))
             {
-                progress?.Report(new PluginDownloadProgress(new FileInfo(destination).Length, manifest.PackageSizeBytes, 0));
+                progress?.Report(new PluginDownloadProgress(new FileInfo(destination).Length, request.SizeBytes, 0));
                 return destination;
             }
             File.Delete(destination);
         }
 
-        var sources = new[] { manifest.PackageUrl }.Concat(manifest.PackageMirrors ?? [])
+        var sources = new[] { request.Url }.Concat(request.Mirrors ?? [])
             .Where(value => Uri.TryCreate(value, UriKind.Absolute, out var uri) && uri.Scheme == Uri.UriSchemeHttps)
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .Select(value => new Uri(value))
@@ -48,8 +80,8 @@ internal sealed class PluginDownloadService(HttpClient httpClient)
             {
                 try
                 {
-                    var completed = await DownloadSourceAsync(source, destination, manifest.PackageSizeBytes, progress, cancellationToken);
-                    if (!await HasExpectedHashAsync(completed, manifest.PackageSha256, cancellationToken))
+                    var completed = await DownloadSourceAsync(source, destination, request.SizeBytes, progress, cancellationToken);
+                    if (!await HasExpectedHashAsync(completed, request.Sha256, cancellationToken))
                     {
                         File.Delete(completed);
                         throw new IOException("Downloaded package SHA-256 does not match the signed manifest.");

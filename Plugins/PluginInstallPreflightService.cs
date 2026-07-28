@@ -21,9 +21,14 @@ internal static class PluginInstallPreflightService
         var fullRoot = Path.GetFullPath(dataRoot);
         var pathRoot = Path.GetPathRoot(fullRoot) ?? throw new InvalidDataException("The plugin data root has no drive.");
         var drive = new DriveInfo(pathRoot);
-        var calculatedDisk = manifest.PackageSizeBytes > (long.MaxValue - 512L * 1024 * 1024) / 2
+        var totalDownload = manifest.PackageSizeBytes;
+        foreach (var asset in manifest.AssetPackages ?? [])
+        {
+            totalDownload = asset.SizeBytes > long.MaxValue - totalDownload ? long.MaxValue : totalDownload + asset.SizeBytes;
+        }
+        var calculatedDisk = totalDownload > (long.MaxValue - 512L * 1024 * 1024) / 2
             ? long.MaxValue
-            : manifest.PackageSizeBytes * 2 + 512L * 1024 * 1024;
+            : totalDownload * 2 + 512L * 1024 * 1024;
         var requiredDisk = Math.Max(manifest.MinimumFreeDiskBytes, calculatedDisk);
         var issues = new List<PluginPreflightIssue>();
         if (drive.AvailableFreeSpace < requiredDisk)

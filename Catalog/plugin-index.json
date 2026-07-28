@@ -1,0 +1,103 @@
+{
+  "schemaVersion": 1,
+  "generatedAt": "2026-07-28T08:00:00+00:00",
+  "plugins": [
+    {
+      "schemaVersion": 6,
+      "id": "woosh-dflow",
+      "displayName": "Woosh-DFlow",
+      "version": "0.1.1\u002B88006c57",
+      "publisher": "SonyResearch",
+      "category": "Sound design",
+      "description": "Open text-to-sound-effects model from Sony Research.",
+      "executable": ".venv/Scripts/python.exe",
+      "arguments": "gradio_Woosh-DFlow.py --server-name 127.0.0.1 --server-port {port}",
+      "runtime": "python",
+      "runtimeVersion": "\u003E=3.12",
+      "port": 7860,
+      "recommendedVramMiB": 6800,
+      "recommendedSystemMemoryMiB": 16384,
+      "isHighVram": true,
+      "requiredFiles": [
+        "gradio_Woosh-DFlow.py",
+        "checkpoints/Woosh-AE",
+        "checkpoints/TextConditionerA",
+        "checkpoints/Woosh-DFlow"
+      ],
+      "dependencies": [
+        "python\u003E=3.12",
+        "cuda",
+        "file:checkpoints/Woosh-DFlow"
+      ],
+      "gitHubRepository": "SonyResearch/Woosh",
+      "gitHubBranch": "88006c57774a85bede9f87733c019664410d6f4e",
+      "packageUrl": "https://github.com/SonyResearch/Woosh/archive/88006c57774a85bede9f87733c019664410d6f4e.zip",
+      "packageMirrors": [],
+      "packageSha256": "134D9E746B697C382AB44D981648011D746DF5529C35FB98D18A5C2A80BCAA69",
+      "packageSizeBytes": 803933,
+      "preservedPaths": [
+        ".venv",
+        "checkpoints",
+        "outputs",
+        "logs"
+      ],
+      "licenseName": "MIT and upstream dataset notices",
+      "licenseUrl": "https://github.com/SonyResearch/Woosh/blob/88006c57774a85bede9f87733c019664410d6f4e/LICENSE.MIT",
+      "requiresLicenseAcceptance": true,
+      "createVirtualEnvironment": true,
+      "virtualEnvironmentPath": ".venv",
+      "requirementsFile": "",
+      "minimumFreeDiskBytes": 12884901888,
+      "requiresExternalAuthorization": false,
+      "modelProvider": "",
+      "modelId": "",
+      "authorizationUrl": "",
+      "authorizationProbePath": "",
+      "managedRuntimeId": "python-3.12.10-x64",
+      "pythonInstallArguments": [
+        "-m",
+        "pip",
+        "install",
+        "--disable-pip-version-check",
+        "-e",
+        "."
+      ],
+      "assetPackages": [
+        {
+          "id": "woosh-ae-v1.0.0",
+          "url": "https://github.com/SonyResearch/Woosh/releases/download/v1.0.0/Woosh-AE.zip",
+          "mirrors": [],
+          "sha256": "D6F77E3792EE43C21DA580F39D6576E0DA3E4B46B949223259ADF36036C1F9AF",
+          "sizeBytes": 822991075,
+          "destinationPath": "checkpoints"
+        },
+        {
+          "id": "text-conditioner-a-v1.0.0",
+          "url": "https://github.com/SonyResearch/Woosh/releases/download/v1.0.0/TextConditionerA.zip",
+          "mirrors": [],
+          "sha256": "68A777B9AC28AA5DAF6017B21AF9A3659DE75074EA14DAC65F5231A42C375193",
+          "sizeBytes": 1297121262,
+          "destinationPath": "checkpoints"
+        },
+        {
+          "id": "woosh-dflow-v1.0.0",
+          "url": "https://github.com/SonyResearch/Woosh/releases/download/v1.0.0/Woosh-DFlow.zip",
+          "mirrors": [],
+          "sha256": "26CFE732500E3952C58AAAF433D29D75B46D42AFE5E52F49430D6093EABFDB04",
+          "sizeBytes": 1281505601,
+          "destinationPath": "checkpoints"
+        }
+      ],
+      "signature": {
+        "keyId": "",
+        "algorithm": "RSA-SHA256",
+        "value": ""
+      }
+    }
+  ],
+  "signature": {
+    "keyId": "bachen-plugin-index-2026",
+    "algorithm": "RSA-SHA256",
+    "value": "gPR/SwvpJ5qSF9qVhDGPObwEh3pXuc8op05Jfm3iWVLxeqWiAiVVkor3k1pmpiHcqb4zSeqJYtrwubYccZReeYnwEY9CNUAqrBJg7UarqTpVx0kZuQX7Iol9UjjEvegq6FYKArk1VftHdvKVjbmgFF7UQOgcDsGZQ4h3KgDJVDGcFfhqx7lGXr9DK7dMMP2Ifc7Nmu1QPuuLD0IZrJzbRv2RNbFCU5zd\u002BjzDM6nLPqdbuMR/f31jsC6qIMdrgvPqbHc3PiHOWW/ALhsgI05fNlZdfme1YuDbCJ5ToY/LnRz5EDbJkNr9LWsHBWbvBokAtuS3UDaZq1pp0j7xZ8R6tQ=="
+  }
+}

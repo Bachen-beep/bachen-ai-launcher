@@ -2,7 +2,7 @@ namespace BaChenAiLauncher;
 
 internal sealed class PluginPackageManifest
 {
-    public int SchemaVersion { get; set; } = 5;
+    public int SchemaVersion { get; set; } = 6;
     public string Id { get; set; } = string.Empty;
     public string DisplayName { get; set; } = string.Empty;
     public string Version { get; set; } = "0.0.0";
@@ -38,7 +38,20 @@ internal sealed class PluginPackageManifest
     public string ModelId { get; set; } = string.Empty;
     public string AuthorizationUrl { get; set; } = string.Empty;
     public string AuthorizationProbePath { get; set; } = string.Empty;
+    public string ManagedRuntimeId { get; set; } = string.Empty;
+    public string[] PythonInstallArguments { get; set; } = [];
+    public PluginAssetPackage[] AssetPackages { get; set; } = [];
     public PluginManifestSignature Signature { get; set; } = new();
+}
+
+internal sealed class PluginAssetPackage
+{
+    public string Id { get; set; } = string.Empty;
+    public string Url { get; set; } = string.Empty;
+    public string[] Mirrors { get; set; } = [];
+    public string Sha256 { get; set; } = string.Empty;
+    public long SizeBytes { get; set; }
+    public string DestinationPath { get; set; } = string.Empty;
 }
 
 internal sealed class PluginManifestSignature

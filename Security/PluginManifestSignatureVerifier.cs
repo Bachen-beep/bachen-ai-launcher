@@ -46,6 +46,60 @@ internal static class PluginManifestSignatureVerifier
 
     public static string CreateCanonicalPayload(PluginPackageManifest manifest)
     {
+        if (manifest.SchemaVersion >= 6)
+        {
+            var versionSixPayload = new
+            {
+                manifest.SchemaVersion,
+                manifest.Id,
+                manifest.DisplayName,
+                manifest.Version,
+                manifest.Publisher,
+                manifest.Category,
+                manifest.Description,
+                manifest.Executable,
+                manifest.Arguments,
+                manifest.Runtime,
+                manifest.RuntimeVersion,
+                manifest.Port,
+                manifest.RecommendedVramMiB,
+                manifest.RecommendedSystemMemoryMiB,
+                manifest.IsHighVram,
+                RequiredFiles = manifest.RequiredFiles ?? [],
+                Dependencies = manifest.Dependencies ?? [],
+                manifest.GitHubRepository,
+                manifest.GitHubBranch,
+                manifest.PackageUrl,
+                PackageMirrors = manifest.PackageMirrors ?? [],
+                PackageSha256 = manifest.PackageSha256.ToUpperInvariant(),
+                manifest.PackageSizeBytes,
+                PreservedPaths = manifest.PreservedPaths ?? [],
+                manifest.LicenseName,
+                manifest.LicenseUrl,
+                manifest.RequiresLicenseAcceptance,
+                manifest.CreateVirtualEnvironment,
+                manifest.VirtualEnvironmentPath,
+                manifest.RequirementsFile,
+                manifest.MinimumFreeDiskBytes,
+                manifest.RequiresExternalAuthorization,
+                manifest.ModelProvider,
+                manifest.ModelId,
+                manifest.AuthorizationUrl,
+                manifest.AuthorizationProbePath,
+                manifest.ManagedRuntimeId,
+                PythonInstallArguments = manifest.PythonInstallArguments ?? [],
+                AssetPackages = (manifest.AssetPackages ?? []).Select(asset => new
+                {
+                    asset.Id,
+                    asset.Url,
+                    Mirrors = asset.Mirrors ?? [],
+                    Sha256 = asset.Sha256.ToUpperInvariant(),
+                    asset.SizeBytes,
+                    asset.DestinationPath
+                }).ToArray()
+            };
+            return JsonSerializer.Serialize(versionSixPayload, CanonicalJsonOptions);
+        }
         if (manifest.SchemaVersion >= 5)
         {
             var versionFivePayload = new

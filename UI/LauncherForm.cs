@@ -793,6 +793,7 @@ internal sealed class LauncherForm : Form
     private static readonly HttpClient GitHubClient = CreateGitHubClient();
     private readonly PluginPackageService _pluginPackageService = new(GitHubClient);
     private readonly PluginDownloadService _pluginDownloadService = new(GitHubClient);
+    private readonly PluginCatalogService _pluginCatalogService = new(GitHubClient);
     private readonly ExternalModelAuthorizationService _authorizationService = new(GitHubClient);
     private readonly GitHubUpdateService _sourceUpdateService = new(GitHubClient);
     private readonly LauncherSelfUpdateService _launcherUpdateService = new(GitHubClient);
@@ -878,6 +879,10 @@ internal sealed class LauncherForm : Form
         Shown += async (_, _) =>
         {
             _gpuRefreshTimer.Start();
+            if (!_settings.FirstRunCompleted)
+            {
+                await ShowFirstRunWizardAsync();
+            }
             await CheckUpdatesInBackgroundAsync();
             await CheckLauncherUpdateInBackgroundAsync();
         };
@@ -1055,23 +1060,9 @@ internal sealed class LauncherForm : Form
 
     private static LauncherSettings CreateFirstRunSettings()
     {
-        var dataRoot = LauncherPaths.DefaultDataDirectory;
-        if (!LauncherPaths.UsesDataOverride)
-        {
-            using var picker = new FolderBrowserDialog
-            {
-                Description = "Choose where BaChen AI Launcher should store plugins, models, logs, and downloads.",
-                InitialDirectory = dataRoot,
-                SelectedPath = dataRoot,
-                ShowNewFolderButton = true,
-                UseDescriptionForTitle = true
-            };
-            if (picker.ShowDialog() == DialogResult.OK && !string.IsNullOrWhiteSpace(picker.SelectedPath))
-            {
-                dataRoot = picker.SelectedPath;
-            }
-        }
-        return CreateSettingsForDataRoot(dataRoot);
+        var settings = CreateSettingsForDataRoot(LauncherPaths.DefaultDataDirectory);
+        settings.FirstRunCompleted = false;
+        return settings;
     }
 
     private static LauncherSettings CreateSettingsForDataRoot(string dataRoot)
@@ -1080,7 +1071,7 @@ internal sealed class LauncherForm : Form
         var plugins = Path.Combine(normalizedRoot, "plugins");
         return new LauncherSettings
         {
-            SchemaVersion = 2,
+            SchemaVersion = 3,
             DataRoot = normalizedRoot,
             WooshRoot = Path.Combine(plugins, "Woosh"),
             StableRoot = Path.Combine(plugins, "Stable Audio 3"),
@@ -1093,7 +1084,7 @@ internal sealed class LauncherForm : Form
 
     private static void NormalizeSettings(LauncherSettings settings)
     {
-        settings.SchemaVersion = 2;
+        settings.SchemaVersion = 3;
         settings.DataRoot = MigrateRenamedPath(settings.DataRoot);
         settings.WooshRoot = MigrateRenamedPath(settings.WooshRoot);
         settings.StableRoot = MigrateRenamedPath(settings.StableRoot);
@@ -1953,7 +1944,7 @@ internal sealed class LauncherForm : Form
 
         var updated = new LauncherSettings
         {
-            SchemaVersion = 2,
+            SchemaVersion = 3,
             DataRoot = dataRootBox.Text.Trim(),
             WooshRoot = wooshBox.Text.Trim(),
             StableRoot = stableBox.Text.Trim(),
@@ -1965,6 +1956,9 @@ internal sealed class LauncherForm : Form
             ,LauncherUpdateChannel = updateChannel.SelectedIndex == 1 ? LauncherUpdateChannel.Preview : LauncherUpdateChannel.Stable
             ,SkippedLauncherVersion = _settings.SkippedLauncherVersion
             ,LauncherUpdateDeferredUntil = _settings.LauncherUpdateDeferredUntil
+            ,FirstRunCompleted = _settings.FirstRunCompleted
+            ,FirstRunWizardStep = _settings.FirstRunWizardStep
+            ,FirstRunSelectedPluginIds = _settings.FirstRunSelectedPluginIds
         };
         if (updated.LauncherUpdateChannel != _settings.LauncherUpdateChannel)
         {
@@ -2161,6 +2155,125 @@ internal sealed class LauncherForm : Form
         }
     }
 
+    private async Task ShowFirstRunWizardAsync()
+    {
+        PluginCatalogIndex catalog;
+        try
+        {
+            SetRuntimePhase("正在验证插件目录", "Verifying plugin catalog");
+            catalog = await _pluginCatalogService.LoadAsync();
+        }
+        catch (Exception ex)
+        {
+            AppendLog(L("首次设置无法载入可信插件目录：", "First-time setup could not load the trusted plugin catalog: ") + ex.Message, null, true);
+            MessageBox.Show(ex.Message, L("插件目录验证失败", "Plugin catalog verification failed"), MessageBoxButtons.OK, MessageBoxIcon.Error);
+            return;
+        }
+
+        using var wizard = new FirstRunWizardForm(
+            _settings,
+            catalog.Plugins,
+            _useEnglish,
+            (dataRoot, selectedPluginIds, step) =>
+            {
+                ApplyFirstRunState(dataRoot, selectedPluginIds, step);
+                return Task.CompletedTask;
+            },
+            async (manifest, setupProgress, downloadProgress, cancellationToken) =>
+                await InstallCatalogPluginAsync(catalog, manifest, setupProgress, downloadProgress, cancellationToken));
+        var completed = wizard.ShowDialog(this) == DialogResult.OK;
+        if (completed)
+        {
+            _settings.FirstRunCompleted = true;
+            _settings.FirstRunWizardStep = 0;
+            _settings.FirstRunSelectedPluginIds = [];
+            SaveSettings(_settings);
+            AppendLog(L("首次运行设置与环境验证已完成。", "First-time setup and environment verification completed."));
+        }
+
+        ConfigureProfiles();
+        _selectedStableProfile = _smallSfx;
+        Controls.Clear();
+        InitializeUi();
+        RefreshStatus();
+    }
+
+    private void ApplyFirstRunState(string dataRoot, string[] selectedPluginIds, int step)
+    {
+        var normalizedRoot = Path.GetFullPath(dataRoot.Trim());
+        var previousRoot = Path.GetFullPath(_settings.DataRoot);
+        _settings.DataRoot = normalizedRoot;
+        if (!_settings.FirstRunCompleted && !normalizedRoot.Equals(previousRoot, StringComparison.OrdinalIgnoreCase))
+        {
+            _settings.WooshRoot = RebaseUninstalledRoot(_settings.WooshRoot, previousRoot, normalizedRoot, "woosh-dflow");
+            _settings.StableRoot = RebaseUninstalledRoot(_settings.StableRoot, previousRoot, normalizedRoot, "Stable Audio 3");
+            _settings.IndexTtsRoot = RebaseUninstalledRoot(_settings.IndexTtsRoot, previousRoot, normalizedRoot, "IndexTTS");
+        }
+        _settings.FirstRunSelectedPluginIds = selectedPluginIds;
+        _settings.FirstRunWizardStep = Math.Clamp(step, 0, 5);
+        EnsureDataDirectories(_settings);
+        SaveSettings(_settings);
+    }
+
+    private static string RebaseUninstalledRoot(string currentPath, string previousDataRoot, string newDataRoot, string directoryName)
+    {
+        var normalizedCurrent = Path.GetFullPath(currentPath);
+        var normalizedPrevious = Path.GetFullPath(previousDataRoot) + Path.DirectorySeparatorChar;
+        return !Directory.Exists(normalizedCurrent) && normalizedCurrent.StartsWith(normalizedPrevious, StringComparison.OrdinalIgnoreCase)
+            ? Path.Combine(newDataRoot, "plugins", directoryName)
+            : currentPath;
+    }
+
+    private async Task<FirstRunInstallOutcome> InstallCatalogPluginAsync(
+        PluginCatalogIndex catalog,
+        PluginPackageManifest manifest,
+        IProgress<string> setupProgress,
+        IProgress<PluginDownloadProgress> downloadProgress,
+        CancellationToken cancellationToken)
+    {
+        if (!await EnsureExternalAuthorizationAsync(manifest))
+        {
+            throw new OperationCanceledException("External model authorization was not completed.", cancellationToken);
+        }
+        var existing = _modelCatalog.Models.FirstOrDefault(model => model.Id.Equals(manifest.Id, StringComparison.OrdinalIgnoreCase));
+        var result = await _pluginPackageService.InstallAsync(
+            manifest,
+            null,
+            _settings.DataRoot,
+            setupProgress,
+            downloadProgress,
+            cancellationToken);
+        PluginCatalogIndexVerifier.WriteInstalledCopy(catalog, result.Definition.RootDirectory);
+        result.Definition.TrustSource = "SignedCatalog";
+        result.Definition.SigningKeyId = catalog.Signature.KeyId;
+        result.Definition.IsManifestTrusted = true;
+        result.Definition.IsBuiltIn = existing?.IsBuiltIn == true;
+        if (existing is not null && result.ReplacedPluginBackup is not null)
+        {
+            File.WriteAllText(
+                Path.Combine(result.ReplacedPluginBackup, ".bachen-plugin-definition.json"),
+                JsonSerializer.Serialize(existing, new JsonSerializerOptions { WriteIndented = true }),
+                Encoding.UTF8);
+        }
+        if (existing is not null)
+        {
+            _modelCatalog.Models.Remove(existing);
+        }
+        _modelCatalog.Models.Add(result.Definition);
+        if (manifest.Id.Equals("woosh-dflow", StringComparison.OrdinalIgnoreCase))
+        {
+            _settings.WooshRoot = result.Definition.RootDirectory;
+            _settings.WooshPort = result.Definition.Port;
+        }
+        SaveModelCatalog(_modelCatalog);
+        SaveSettings(_settings);
+
+        var checks = PluginDependencyChecker.Check(result.Definition.Dependencies, result.Definition.RootDirectory).ToList();
+        var trust = InstalledPluginTrustValidator.Verify(result.Definition, _trustedPublishers);
+        checks.Add(new DependencyCheckResult("signed-catalog", trust.IsTrusted, true, trust.Message));
+        return new FirstRunInstallOutcome(result.Definition, checks);
+    }
+
     private ContextMenuStrip CreateMaintenanceMenu()
     {
         var menu = new ContextMenuStrip();
@@ -2168,6 +2281,7 @@ internal sealed class LauncherForm : Form
         menu.Items.Add(L("恢复上一版启动器", "Restore previous launcher"), null, async (_, _) => await RollbackLauncherAsync());
         menu.Items.Add(new ToolStripSeparator());
         menu.Items.Add(L("安装签名插件包", "Install signed plugin"), null, async (_, _) => await ShowInstallPluginWizardAsync());
+        menu.Items.Add(L("重新运行首次设置", "Run first-time setup again"), null, async (_, _) => await ShowFirstRunWizardAsync());
         menu.Items.Add(L("卸载所选插件", "Uninstall selected plugin"), null, (_, _) => UninstallSelectedPlugin());
         menu.Items.Add(L("受信任发布者", "Trusted publishers"), null, (_, _) => ShowTrustedPublishersDialog());
         menu.Items.Add(L("删除 Hugging Face 登录凭据", "Delete Hugging Face credential"), null, (_, _) => DeleteHuggingFaceCredential());

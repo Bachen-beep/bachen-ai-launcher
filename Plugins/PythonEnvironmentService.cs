@@ -5,7 +5,7 @@ namespace BaChenAiLauncher;
 
 internal static class PythonEnvironmentService
 {
-    public static async Task EnsureAsync(PluginPackageManifest manifest, string pluginRoot, IProgress<string>? progress = null, CancellationToken cancellationToken = default)
+    public static async Task EnsureAsync(PluginPackageManifest manifest, string pluginRoot, string dataRoot, HttpClient httpClient, IProgress<string>? progress = null, IProgress<PluginDownloadProgress>? downloadProgress = null, CancellationToken cancellationToken = default)
     {
         if (!manifest.CreateVirtualEnvironment)
         {
@@ -20,8 +20,10 @@ internal static class PythonEnvironmentService
         if (!File.Exists(environmentPython))
         {
             progress?.Report("Creating Python virtual environment");
-            var launcher = FindPythonLauncher();
-            var arguments = launcher.EndsWith("py.exe", StringComparison.OrdinalIgnoreCase)
+            var launcher = string.IsNullOrWhiteSpace(manifest.ManagedRuntimeId)
+                ? FindPythonLauncher()
+                : await new ManagedPythonRuntimeService(httpClient).EnsureAsync(manifest.ManagedRuntimeId, dataRoot, progress, downloadProgress, cancellationToken);
+            var arguments = launcher.EndsWith("py.exe", StringComparison.OrdinalIgnoreCase) && string.IsNullOrWhiteSpace(manifest.ManagedRuntimeId)
                 ? new[] { "-3", "-m", "venv", environmentPath }
                 : new[] { "-m", "venv", environmentPath };
             await RunAsync(launcher, arguments, pluginRoot, cancellationToken);
@@ -36,6 +38,11 @@ internal static class PythonEnvironmentService
             }
             progress?.Report("Installing Python dependencies");
             await RunAsync(environmentPython, ["-m", "pip", "install", "--disable-pip-version-check", "-r", requirements], pluginRoot, cancellationToken);
+        }
+        if ((manifest.PythonInstallArguments ?? []).Length > 0)
+        {
+            progress?.Report("Installing the Python plugin package");
+            await RunAsync(environmentPython, manifest.PythonInstallArguments ?? [], pluginRoot, cancellationToken);
         }
     }
 

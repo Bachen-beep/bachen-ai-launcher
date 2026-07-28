@@ -7,7 +7,7 @@ namespace BaChenAiLauncher;
 
 internal sealed class PluginPackageService(HttpClient httpClient)
 {
-    public async Task<PluginInstallResult> InstallAsync(PluginPackageManifest manifest, string? localPackagePath, string dataRoot, IProgress<string>? setupProgress = null, CancellationToken cancellationToken = default)
+    public async Task<PluginInstallResult> InstallAsync(PluginPackageManifest manifest, string? localPackagePath, string dataRoot, IProgress<string>? setupProgress = null, IProgress<PluginDownloadProgress>? downloadProgress = null, CancellationToken cancellationToken = default)
     {
         ValidateManifest(manifest);
         var preflight = PluginInstallPreflightService.Assess(manifest, dataRoot);
@@ -26,7 +26,7 @@ internal sealed class PluginPackageService(HttpClient httpClient)
         var packagePath = localPackagePath;
         if (string.IsNullOrWhiteSpace(packagePath))
         {
-            packagePath = await new PluginDownloadService(httpClient).DownloadAsync(manifest, dataRoot, cancellationToken: cancellationToken);
+            packagePath = await new PluginDownloadService(httpClient).DownloadAsync(manifest, dataRoot, downloadProgress, cancellationToken);
         }
 
         packagePath = Path.GetFullPath(packagePath);
@@ -53,7 +53,15 @@ internal sealed class PluginPackageService(HttpClient httpClient)
             Directory.CreateDirectory(stagingRoot);
             ExtractSecurely(packagePath, stagingRoot);
             var contentRoot = ResolveContentRoot(stagingRoot);
-            await PythonEnvironmentService.EnsureAsync(manifest, contentRoot, setupProgress, cancellationToken);
+            foreach (var asset in manifest.AssetPackages ?? [])
+            {
+                setupProgress?.Report($"Downloading model asset {asset.Id}");
+                var assetPath = await new PluginDownloadService(httpClient).DownloadAssetAsync(manifest.Id, asset, dataRoot, downloadProgress, cancellationToken);
+                var assetRoot = ResolveSafeContentPath(contentRoot, asset.DestinationPath, "asset destination");
+                Directory.CreateDirectory(assetRoot);
+                ExtractSecurely(assetPath, assetRoot);
+            }
+            await PythonEnvironmentService.EnsureAsync(manifest, contentRoot, dataRoot, httpClient, setupProgress, downloadProgress, cancellationToken);
             ValidateInstalledFiles(manifest, contentRoot);
 
             if (Directory.Exists(targetRoot))
@@ -139,7 +147,7 @@ internal sealed class PluginPackageService(HttpClient httpClient)
 
     private static void ValidateManifest(PluginPackageManifest manifest)
     {
-        if (manifest.SchemaVersion is not (2 or 3 or 4 or 5))
+        if (manifest.SchemaVersion is not (2 or 3 or 4 or 5 or 6))
         {
             throw new InvalidDataException($"Unsupported plugin manifest schema: {manifest.SchemaVersion}.");
         }
@@ -234,10 +242,39 @@ internal sealed class PluginPackageService(HttpClient httpClient)
                 }
             }
         }
+        if (manifest.SchemaVersion >= 6)
+        {
+            if (manifest.CreateVirtualEnvironment && string.IsNullOrWhiteSpace(manifest.ManagedRuntimeId))
+            {
+                throw new InvalidDataException("Schema v6 Python plugins must declare managedRuntimeId.");
+            }
+            foreach (var asset in manifest.AssetPackages ?? [])
+            {
+                if (string.IsNullOrWhiteSpace(asset.Id) ||
+                    !Uri.TryCreate(asset.Url, UriKind.Absolute, out var assetUri) || assetUri.Scheme != Uri.UriSchemeHttps ||
+                    asset.Sha256.Length != 64 || asset.Sha256.Any(character => !Uri.IsHexDigit(character)) ||
+                    asset.SizeBytes <= 0 || !IsSafeRelativePath(asset.DestinationPath) ||
+                    (asset.Mirrors ?? []).Any(mirror => !Uri.TryCreate(mirror, UriKind.Absolute, out var mirrorUri) || mirrorUri.Scheme != Uri.UriSchemeHttps))
+                {
+                    throw new InvalidDataException($"Asset package '{asset.Id}' is incomplete or unsafe.");
+                }
+            }
+        }
     }
 
     private static bool IsSafeRelativePath(string value)
         => !string.IsNullOrWhiteSpace(value) && !Path.IsPathRooted(value) && !value.Contains("..", StringComparison.Ordinal);
+
+    private static string ResolveSafeContentPath(string root, string relative, string field)
+    {
+        if (!IsSafeRelativePath(relative))
+        {
+            throw new InvalidDataException($"The {field} must be a safe relative path.");
+        }
+        var normalizedRoot = Path.GetFullPath(root) + Path.DirectorySeparatorChar;
+        var path = Path.GetFullPath(Path.Combine(root, relative.Replace('/', Path.DirectorySeparatorChar)));
+        return path.StartsWith(normalizedRoot, StringComparison.OrdinalIgnoreCase) ? path : throw new InvalidDataException($"The {field} escapes the plugin root.");
+    }
 
     private static void ExtractSecurely(string packagePath, string stagingRoot)
     {
@@ -299,6 +336,10 @@ internal static class InstalledPluginTrustValidator
 {
     public static ManifestVerificationResult Verify(LauncherModelDefinition definition, TrustedPublisherStore store)
     {
+        if (definition.TrustSource.Equals("SignedCatalog", StringComparison.OrdinalIgnoreCase))
+        {
+            return VerifySignedCatalogEntry(definition);
+        }
         if (!definition.TrustSource.Equals("SignedManifest", StringComparison.OrdinalIgnoreCase))
         {
             return new ManifestVerificationResult(true, definition.IsBuiltIn ? "Built-in plugin." : "Locally configured by the user.");
@@ -320,18 +361,7 @@ internal static class InstalledPluginTrustValidator
             {
                 return signature;
             }
-            var matchesCatalog = definition.Id.Equals(manifest.Id, StringComparison.OrdinalIgnoreCase) &&
-                definition.Executable.Equals(manifest.Executable, StringComparison.Ordinal) &&
-                definition.Arguments.Equals(manifest.Arguments, StringComparison.Ordinal) &&
-                definition.Port == manifest.Port &&
-                definition.PackageSha256.Equals(manifest.PackageSha256, StringComparison.OrdinalIgnoreCase);
-            if (matchesCatalog && manifest.SchemaVersion >= 4)
-            {
-                matchesCatalog = definition.Runtime.Equals(manifest.Runtime, StringComparison.OrdinalIgnoreCase) &&
-                    definition.RuntimeVersion.Equals(manifest.RuntimeVersion, StringComparison.Ordinal) &&
-                    definition.PackageSizeBytes == manifest.PackageSizeBytes &&
-                    definition.PreservedPaths.SequenceEqual(manifest.PreservedPaths ?? [], StringComparer.OrdinalIgnoreCase);
-            }
+            var matchesCatalog = MatchesDefinition(definition, manifest);
             return matchesCatalog
                 ? signature
                 : new ManifestVerificationResult(false, "The executable, arguments, port, or package hash differs from the signed manifest.", signature.Publisher);
@@ -340,5 +370,57 @@ internal static class InstalledPluginTrustValidator
         {
             return new ManifestVerificationResult(false, $"Installed manifest validation failed: {ex.Message}");
         }
+    }
+
+    private static ManifestVerificationResult VerifySignedCatalogEntry(LauncherModelDefinition definition)
+    {
+        try
+        {
+            var manifestPath = Path.Combine(definition.RootDirectory, ".bachen-plugin-manifest.json");
+            var catalogPath = Path.Combine(definition.RootDirectory, PluginCatalogIndexVerifier.InstalledIndexFileName);
+            if (!File.Exists(manifestPath) || !File.Exists(catalogPath))
+            {
+                return new ManifestVerificationResult(false, "The installed catalog trust evidence is missing.");
+            }
+            var options = new JsonSerializerOptions { PropertyNameCaseInsensitive = true };
+            var manifest = JsonSerializer.Deserialize<PluginPackageManifest>(File.ReadAllText(manifestPath), options)
+                ?? throw new InvalidDataException("The installed manifest could not be parsed.");
+            var catalog = JsonSerializer.Deserialize<PluginCatalogIndex>(File.ReadAllText(catalogPath), options)
+                ?? throw new InvalidDataException("The installed plugin index could not be parsed.");
+            PluginCatalogIndexVerifier.Validate(catalog);
+            var signedManifest = catalog.Plugins.SingleOrDefault(plugin => plugin.Id.Equals(definition.Id, StringComparison.OrdinalIgnoreCase));
+            if (signedManifest is null ||
+                !PluginManifestSignatureVerifier.CreateCanonicalPayload(manifest).Equals(
+                    PluginManifestSignatureVerifier.CreateCanonicalPayload(signedManifest),
+                    StringComparison.Ordinal) ||
+                !MatchesDefinition(definition, signedManifest))
+            {
+                return new ManifestVerificationResult(false, "The installed command or manifest differs from the signed plugin index.");
+            }
+            return new ManifestVerificationResult(true, "Verified by the signed BaChen plugin index.");
+        }
+        catch (Exception ex)
+        {
+            return new ManifestVerificationResult(false, $"Installed plugin index validation failed: {ex.Message}");
+        }
+    }
+
+    private static bool MatchesDefinition(LauncherModelDefinition definition, PluginPackageManifest manifest)
+    {
+        var matches = definition.Id.Equals(manifest.Id, StringComparison.OrdinalIgnoreCase) &&
+            definition.Executable.Equals(manifest.Executable, StringComparison.Ordinal) &&
+            definition.Arguments.Equals(manifest.Arguments, StringComparison.Ordinal) &&
+            definition.Port == manifest.Port &&
+            definition.PackageSha256.Equals(manifest.PackageSha256, StringComparison.OrdinalIgnoreCase) &&
+            definition.RequiredFiles.SequenceEqual(manifest.RequiredFiles ?? [], StringComparer.OrdinalIgnoreCase) &&
+            definition.Dependencies.SequenceEqual(manifest.Dependencies ?? [], StringComparer.OrdinalIgnoreCase);
+        if (matches && manifest.SchemaVersion >= 4)
+        {
+            matches = definition.Runtime.Equals(manifest.Runtime, StringComparison.OrdinalIgnoreCase) &&
+                definition.RuntimeVersion.Equals(manifest.RuntimeVersion, StringComparison.Ordinal) &&
+                definition.PackageSizeBytes == manifest.PackageSizeBytes &&
+                definition.PreservedPaths.SequenceEqual(manifest.PreservedPaths ?? [], StringComparer.OrdinalIgnoreCase);
+        }
+        return matches;
     }
 }
