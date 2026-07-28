@@ -31,6 +31,8 @@
   and environment values redacted.
 - Public releases should be Authenticode signed. Unsigned development builds
   remain clearly identified and are not treated as production-ready.
+- Preview and production releases must create GitHub Artifact Attestations for
+  both executable artifacts so users can verify repository and workflow origin.
 
 ## Clean-machine matrix
 

@@ -7,6 +7,8 @@ on:
 
 permissions:
   contents: write
+  id-token: write
+  attestations: write
 
 jobs:
   release:
@@ -122,12 +124,22 @@ jobs:
           )
           [IO.File]::WriteAllLines((Join-Path $PWD "artifacts\SHA256SUMS.txt"), $checksums)
 
+      - name: Attest standalone launcher provenance
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: artifacts/BaChen.AI.Launcher.exe
+
+      - name: Attest installer provenance
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: artifacts/installer/BaChen-AI-Launcher-Setup-${{ steps.version.outputs.version }}.exe
+
       - name: Publish GitHub release
         uses: softprops/action-gh-release@v2
         with:
           prerelease: ${{ steps.version.outputs.prerelease }}
           generate_release_notes: true
-          body_path: Docs/ReleaseNotes-0.12.0-stage2-preview.md
+          body_path: Docs/ReleaseNotes-0.12.1-stage2-preview.md
           files: |
             artifacts/BaChen.AI.Launcher.exe
             artifacts/installer/BaChen-AI-Launcher-Setup-${{ steps.version.outputs.version }}.exe
