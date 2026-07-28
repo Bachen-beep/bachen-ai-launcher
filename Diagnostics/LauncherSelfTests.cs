@@ -76,6 +76,7 @@ internal static class LauncherSelfTests
             var dataRoot = Path.Combine(testRoot, "data");
             var install = await packageService.InstallAsync(manifest, packagePath, dataRoot);
             Assert(File.Exists(Path.Combine(install.Definition.RootDirectory, "start.cmd")), "Secure ZIP installation", lines);
+            Assert(install.Definition.InstalledVersion == "1.0.0" && install.Definition.Dependencies.SequenceEqual(["file:model.dat"]), "Version and dependency metadata", lines);
             Assert(InstalledPluginTrustValidator.Verify(install.Definition, publishers).IsTrusted, "Installed command trust validation", lines);
             install.Definition.Arguments = "--tampered";
             Assert(!InstalledPluginTrustValidator.Verify(install.Definition, publishers).IsTrusted, "Catalog tamper detection", lines);
@@ -89,6 +90,15 @@ internal static class LauncherSelfTests
 
             var uninstall = packageService.Uninstall(install.Definition, dataRoot);
             Assert(uninstall.FilesMoved && uninstall.BackupPath is not null && Directory.Exists(uninstall.BackupPath), "Recoverable plugin uninstall", lines);
+
+            var settingsPath = Path.Combine(testRoot, "config", "launcher.settings.json");
+            var expectedSettings = new LauncherSettings { DataRoot = dataRoot, WooshPort = 18001, StablePort = 18002, IndexTtsPort = 18003 };
+            LauncherConfigurationStore.SaveAtomic(settingsPath, expectedSettings);
+            var loadedSettings = LauncherConfigurationStore.LoadOrCreate(settingsPath, () => new LauncherSettings());
+            Assert(loadedSettings.WooshPort == 18001 && File.Exists(settingsPath), "Atomic configuration save and load", lines);
+            await File.WriteAllTextAsync(settingsPath, "{ invalid json", Encoding.UTF8);
+            _ = LauncherConfigurationStore.LoadOrCreate(settingsPath, () => new LauncherSettings());
+            Assert(Directory.EnumerateFiles(Path.Combine(Path.GetDirectoryName(settingsPath)!, "backups", "corrupt-config")).Any(), "Corrupt configuration archival", lines);
             lines.Add("SELF TEST PASSED");
             await WriteReportAsync(reportPath, lines);
             return 0;
