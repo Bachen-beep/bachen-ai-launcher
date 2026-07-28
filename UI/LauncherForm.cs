@@ -2539,7 +2539,7 @@ internal sealed class LauncherForm : Form
         {
             _maintenanceMenu?.Dispose();
             _maintenanceMenu = CreateMaintenanceMenu();
-            _maintenanceMenu.Show(toolsButton, new Point(0, toolsButton.Height));
+            _maintenanceMenu.Show(toolsButton, new Point(toolsButton.Width - _maintenanceMenu.PreferredSize.Width, toolsButton.Height));
         };
         header.Controls.Add(toolsButton);
         var languageButton = CreateActionButton(_useEnglish ? "中文" : "EN", Color.FromArgb(53, 127, 118), 74);
@@ -3260,7 +3260,7 @@ internal sealed class LauncherForm : Form
         {
             _maintenanceMenu?.Dispose();
             _maintenanceMenu = CreateMaintenanceMenu();
-            _maintenanceMenu.Show(maintenanceButton, new Point(0, maintenanceButton.Height));
+            _maintenanceMenu.Show(maintenanceButton, new Point(maintenanceButton.Width - _maintenanceMenu.PreferredSize.Width, maintenanceButton.Height));
         };
         header.Controls.Add(maintenanceButton);
 
