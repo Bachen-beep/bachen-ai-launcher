@@ -20,6 +20,9 @@
 - 持久轮转日志、全局崩溃日志和一键脱敏诊断导出
 - 轻量 Inno Setup 安装包，升级和卸载默认保留用户配置与插件数据
 - 内置插件、自定义本地配置和签名第三方插件采用不同信任来源
+- 新用户首次运行向导，可选择存储位置、检查硬件、接受许可证并自动部署插件
+- 固定版本的托管 Python 运行时，无需用户预装 Python 或使用终端
+- RSA 签名插件索引，远程不可用时自动使用 EXE 内嵌可信目录
 
 插件清单规范、依赖格式和发布者签名流程参见 `Docs/PluginManifest.md`。
 
@@ -57,18 +60,18 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File ".\scripts\Publish.ps1"
 安装 Inno Setup 6 后运行：
 
 ```powershell
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File ".\scripts\Build-Installer.ps1" -Version "0.13.2"
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File ".\scripts\Build-Installer.ps1" -Version "0.16.0"
 ```
 
 安装包位于 `artifacts\installer`。安装包只包含启动器、许可证和第三方声明，不包含插件、Python 环境或模型权重。阶段二发布边界与验收标准参见 `Docs/StageTwoReleasePlan.md`，签名配置参见 `Docs/ReleaseSigning.md`。
 
-发布前还应检查 `Docs/CleanMachineTestMatrix.md`、`Docs/ReleaseChecklist.md` 和 `Docs/ReleaseSigning.md`。当前 GitHub 预览版说明位于 `Docs/ReleaseNotes-0.13.2-stage2-preview.md`。
+发布前还应检查 `Docs/CleanMachineTestMatrix.md`、`Docs/ReleaseChecklist.md` 和 `Docs/ReleaseSigning.md`。阶段六验收结果位于 `Docs/StageSixCloseout.md`，当前预览版说明位于 `Docs/ReleaseNotes-0.16.0-stage6-preview.md`。
 
 公开 Release 会为单文件启动器和安装包生成 GitHub Artifact Attestation。下载后可验证构建来源：
 
 ```powershell
 gh attestation verify ".\BaChen.AI.Launcher.exe" --repo Bachen-beep/bachen-ai-launcher
-gh attestation verify ".\BaChen-AI-Launcher-Setup-0.13.2.exe" --repo Bachen-beep/bachen-ai-launcher
+gh attestation verify ".\BaChen-AI-Launcher-Setup-0.16.0.exe" --repo Bachen-beep/bachen-ai-launcher
 ```
 
 Attestation 用于证明文件来自指定仓库、提交和 GitHub Actions 工作流，不能代替 Authenticode，也不会消除 Windows SmartScreen 提示。

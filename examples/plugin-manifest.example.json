@@ -1,12 +1,12 @@
 {
-  "schemaVersion": 5,
+  "schemaVersion": 6,
   "id": "example-image-plugin",
   "displayName": "Example Image Plugin",
   "version": "1.0.0",
   "publisher": "Example Publisher",
   "category": "Image generation",
   "description": "Example signed plugin package for BaChen AI Launcher.",
-  "executable": "runtime/python.exe",
+  "executable": ".venv/Scripts/python.exe",
   "arguments": "app.py --host 127.0.0.1 --port {port}",
   "runtime": "python",
   "runtimeVersion": ">=3.10,<3.13",
@@ -47,6 +47,25 @@
   "modelId": "publisher/gated-model",
   "authorizationUrl": "https://huggingface.co/publisher/gated-model",
   "authorizationProbePath": "config.json",
+  "managedRuntimeId": "python-3.12.10-x64",
+  "pythonInstallArguments": [
+    "-m",
+    "pip",
+    "install",
+    "--disable-pip-version-check",
+    "-e",
+    "."
+  ],
+  "assetPackages": [
+    {
+      "id": "example-model-1.0.0",
+      "url": "https://example.com/example-model-1.0.0.zip",
+      "mirrors": [],
+      "sha256": "REPLACE_WITH_64_CHARACTER_SHA256",
+      "sizeBytes": 987654321,
+      "destinationPath": "models"
+    }
+  ],
   "signature": {
     "keyId": "example-publisher-2026",
     "algorithm": "RSA-SHA256",

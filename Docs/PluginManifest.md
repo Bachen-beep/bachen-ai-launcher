@@ -1,6 +1,6 @@
-# BaChen Plugin Manifest v5
+# BaChen Plugin Manifest v6
 
-BaChen AI Launcher 只会从经过信任的 RSA 公钥验证成功的清单安装插件。安装包还必须通过清单中的 SHA-256 校验。
+BaChen AI Launcher 支持两种可信安装来源：经过发布者 RSA 公钥验证的独立清单，或由 BaChen RSA 签名插件索引提供的清单。源码包、运行时和模型资产都必须通过固定大小与 SHA-256 校验。
 
 ## Package layout
 
@@ -10,7 +10,7 @@ BaChen AI Launcher 只会从经过信任的 RSA 公钥验证成功的清单安�
 
 ## Required fields
 
-- `schemaVersion`: 新插件使用 `5`；启动器继续兼容已签名的 v2、v3 和 v4 清单。
+- `schemaVersion`: 新插件使用 `6`；启动器继续兼容已签名的 v2-v5 清单。
 - `id`: 小写稳定 ID，只能包含字母、数字、`-` 和 `_`。
 - `displayName`, `version`, `publisher`, `category`, `description`。
 - `executable`: 相对于插件目录的启动程序。
@@ -36,6 +36,9 @@ BaChen AI Launcher 只会从经过信任的 RSA 公钥验证成功的清单安�
 - `modelProvider`, `modelId`: 当前支持 `huggingface` 和对应模型 ID。
 - `authorizationUrl`: 用户自行注册、登录和接受条款的官方 HTTPS 页面。
 - `authorizationProbePath`: 用于验证实际模型读取权限的小文件路径。
+- `managedRuntimeId`: 由启动器管理的固定运行时 ID。当前支持 `python-3.12.10-x64`。
+- `pythonInstallArguments`: 在插件虚拟环境中执行的参数数组，例如 `-m pip install -e .`。
+- `assetPackages`: 模型或其他大文件包列表；每项声明稳定 ID、HTTPS 主地址、镜像、SHA-256、精确大小与安全目标目录。
 
 启动器不会替用户注册账户、提交许可协议或申请 gated model 权限。令牌只以只读用途保存到 Windows Credential Manager，不写入插件清单、配置文件或诊断日志。
 
@@ -67,3 +70,9 @@ BaChen AI Launcher 只会从经过信任的 RSA 公钥验证成功的清单安�
 仓库提供的 `scripts/Sign-PluginManifest.ps1` 可完成第 2 到第 4 步，需要 PowerShell 7.2 或更高版本。
 
 私钥不得放入插件 ZIP、源码仓库或启动器配置目录。
+
+## Signed catalog
+
+官方插件目录位于 `Catalog/plugin-index.json`，启动器会验证整个索引的 RSA-SHA256 签名。远程索引不可用时回退到 EXE 内嵌的同一份签名索引。安装后会在插件目录保留签名索引证据；每次启动插件前重新验证索引签名、清单内容和实际启动命令。
+
+插件索引私钥不得提交到仓库。当前本地发布操作使用 Windows Credential Manager 中的 `BaChenAILauncher/PluginIndexSigningKey`，GitHub Release 发布的是已经签名的公开索引文件。

@@ -28,7 +28,7 @@ jobs:
         shell: pwsh
         run: |
           $tag = "${{ github.ref_name }}"
-          if ($tag -notmatch '^v(?<version>\d+\.\d+\.\d+)(?<suffix>-stage2-(?:preview|rc\d+))?$') { throw "Invalid release tag: $tag" }
+          if ($tag -notmatch '^v(?<version>\d+\.\d+\.\d+)(?<suffix>-stage(?:2|6)-(?:preview|rc\d+))?$') { throw "Invalid release tag: $tag" }
           [xml]$project = Get-Content ".\BaChen AI Launcher.csproj"
           if ($project.Project.PropertyGroup.Version[0] -ne $Matches.version) {
             throw "Tag version $($Matches.version) does not match project version $($project.Project.PropertyGroup.Version[0])."
@@ -101,6 +101,7 @@ jobs:
           $tag = "${{ github.ref_name }}"
           .\scripts\Build-Installer.ps1 -Version $version
           Copy-Item ".\artifacts\release\BaChen AI Launcher.exe" ".\artifacts\BaChen.AI.Launcher.exe"
+          Copy-Item ".\Catalog\plugin-index.json" ".\artifacts\plugin-index.json"
           $keyPath = Join-Path $env:RUNNER_TEMP "launcher-update-private.pem"
           [IO.File]::WriteAllBytes($keyPath, [Convert]::FromBase64String($env:UPDATE_PRIVATE_KEY_BASE64))
           .\scripts\New-UpdateManifest.ps1 `
@@ -151,7 +152,7 @@ jobs:
       - name: Retain qualification evidence
         uses: actions/upload-artifact@v7
         with:
-          name: stage-two-qualification-${{ steps.version.outputs.version }}
+          name: release-qualification-${{ steps.version.outputs.version }}
           path: artifacts/test-evidence/*.txt
           if-no-files-found: error
           retention-days: 90
@@ -172,6 +173,7 @@ jobs:
             "$((Get-FileHash '.\artifacts\BaChen.AI.Launcher.exe' -Algorithm SHA256).Hash)  BaChen.AI.Launcher.exe",
             "$((Get-FileHash $installer.FullName -Algorithm SHA256).Hash)  $($installer.Name)",
             "$((Get-FileHash '.\artifacts\launcher-update.json' -Algorithm SHA256).Hash)  launcher-update.json",
+            "$((Get-FileHash '.\artifacts\plugin-index.json' -Algorithm SHA256).Hash)  plugin-index.json",
             "$((Get-FileHash '.\artifacts\BaChen-AI-Launcher.spdx.json' -Algorithm SHA256).Hash)  BaChen-AI-Launcher.spdx.json"
           )
           [IO.File]::WriteAllLines((Join-Path $PWD "artifacts\SHA256SUMS.txt"), $checksums)
@@ -197,6 +199,7 @@ jobs:
             artifacts/BaChen.AI.Launcher.exe
             artifacts/installer/BaChen-AI-Launcher-Setup-${{ steps.version.outputs.version }}.exe
             artifacts/launcher-update.json
+            artifacts/plugin-index.json
             artifacts/SHA256SUMS.txt
             artifacts/BaChen-AI-Launcher.spdx.json
 
@@ -232,7 +235,7 @@ jobs:
               $expected[$Matches.name] = $Matches.hash
             }
           }
-          foreach ($name in @("BaChen.AI.Launcher.exe", "BaChen-AI-Launcher-Setup-${{ steps.version.outputs.version }}.exe", "launcher-update.json", "BaChen-AI-Launcher.spdx.json")) {
+          foreach ($name in @("BaChen.AI.Launcher.exe", "BaChen-AI-Launcher-Setup-${{ steps.version.outputs.version }}.exe", "launcher-update.json", "plugin-index.json", "BaChen-AI-Launcher.spdx.json")) {
             $actual = (Get-FileHash (Join-Path $verifyRoot $name) -Algorithm SHA256).Hash
             if (-not $expected.ContainsKey($name) -or $actual -ne $expected[$name]) {
               throw "Published SHA-256 verification failed for $name."

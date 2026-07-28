@@ -2,11 +2,14 @@
 
 ## Version and source
 
-- Use `v<version>-stage2-preview` for previews, `v<version>-stage2-rc<n>` for
-  release candidates, and `v<version>` for stable releases.
+- Use `v<version>-stage6-preview` for the current preview, `v<version>-stage6-rc<n>`
+  for current release candidates, and `v<version>` for stable releases. Existing
+  Stage Two tags remain supported for historical rebuilds.
 - Match the project version to the numeric tag version.
 - Add `Docs/ReleaseNotes-<tag-without-v>.md`; the workflow rejects missing notes.
 - Confirm the release commit is on `main` and Windows CI passes.
+- Confirm `Catalog/plugin-index.json` validates against the embedded plugin-index
+  public key and is included in `SHA256SUMS.txt`.
 
 ## Security and artifacts
 
