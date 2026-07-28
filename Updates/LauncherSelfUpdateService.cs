@@ -63,33 +63,42 @@ internal sealed class LauncherSelfUpdateService(HttpClient client)
         throw new InvalidOperationException("No preview launcher release with an update manifest is available.");
     }
 
-    public async Task<string> DownloadVerifiedAsync(LauncherUpdateManifest manifest)
+    public Task<string> DownloadVerifiedAsync(LauncherUpdateManifest manifest)
+        => DownloadVerifiedAsync(manifest, null);
+
+    internal async Task<string> DownloadVerifiedAsync(LauncherUpdateManifest manifest, string? updateRootOverride)
     {
-        var updateRoot = Path.Combine(Path.GetTempPath(), "bachen-launcher-update-" + Guid.NewGuid().ToString("N"));
+        var updateRoot = updateRootOverride ?? Path.Combine(Path.GetTempPath(), "bachen-launcher-update-" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(updateRoot);
         var packagePath = Path.Combine(updateRoot, "BaChen AI Launcher.exe");
-        using var response = await client.GetAsync(manifest.DownloadUrl, HttpCompletionOption.ResponseHeadersRead);
-        response.EnsureSuccessStatusCode();
-        var requiredBytes = response.Content.Headers.ContentLength ?? 150L * 1024 * 1024;
-        var drive = new DriveInfo(Path.GetPathRoot(updateRoot)!);
-        if (drive.AvailableFreeSpace < requiredBytes + 100L * 1024 * 1024)
+        try
         {
-            Directory.Delete(updateRoot, true);
-            throw new IOException($"Insufficient disk space. At least {(requiredBytes + 100L * 1024 * 1024) / 1024 / 1024} MiB must be available.");
+            using var response = await client.GetAsync(manifest.DownloadUrl, HttpCompletionOption.ResponseHeadersRead);
+            response.EnsureSuccessStatusCode();
+            var requiredBytes = response.Content.Headers.ContentLength ?? 150L * 1024 * 1024;
+            var drive = new DriveInfo(Path.GetPathRoot(updateRoot)!);
+            if (drive.AvailableFreeSpace < requiredBytes + 100L * 1024 * 1024)
+            {
+                throw new IOException($"Insufficient disk space. At least {(requiredBytes + 100L * 1024 * 1024) / 1024 / 1024} MiB must be available.");
+            }
+            await using (var input = await response.Content.ReadAsStreamAsync())
+            await using (var output = File.Create(packagePath))
+            {
+                await input.CopyToAsync(output);
+            }
+            await using var package = File.OpenRead(packagePath);
+            var actual = Convert.ToHexString(await SHA256.HashDataAsync(package));
+            if (!actual.Equals(manifest.Sha256, StringComparison.OrdinalIgnoreCase))
+            {
+                throw new InvalidDataException("The downloaded launcher hash does not match the signed update manifest.");
+            }
+            return packagePath;
         }
-        await using (var input = await response.Content.ReadAsStreamAsync())
-        await using (var output = File.Create(packagePath))
+        catch
         {
-            await input.CopyToAsync(output);
+            TryDeleteDirectory(updateRoot);
+            throw;
         }
-        await using var package = File.OpenRead(packagePath);
-        var actual = Convert.ToHexString(await SHA256.HashDataAsync(package));
-        if (!actual.Equals(manifest.Sha256, StringComparison.OrdinalIgnoreCase))
-        {
-            Directory.Delete(updateRoot, true);
-            throw new InvalidDataException("The downloaded launcher hash does not match the signed update manifest.");
-        }
-        return packagePath;
     }
 
     public static void BeginApply(string packagePath, LauncherUpdateManifest manifest)
@@ -144,29 +153,10 @@ internal sealed class LauncherSelfUpdateService(HttpClient client)
             {
                 // The launcher already exited.
             }
-            await using (var stream = File.OpenRead(packagePath))
-            {
-                var actual = Convert.ToHexString(await SHA256.HashDataAsync(stream));
-                if (!actual.Equals(expectedSha256, StringComparison.OrdinalIgnoreCase))
-                {
-                    throw new InvalidDataException("The staged update hash changed before installation.");
-                }
-            }
             var backupDirectory = Path.Combine(LauncherPaths.UserConfigDirectory, "updates", "backup");
             Directory.CreateDirectory(backupDirectory);
             var backupPath = Path.Combine(backupDirectory, "BaChen AI Launcher.previous.exe");
-            var replacementPath = targetPath + ".new";
-            File.Copy(packagePath, replacementPath, true);
-            File.Copy(targetPath, backupPath, true);
-            try
-            {
-                File.Move(replacementPath, targetPath, true);
-            }
-            catch
-            {
-                File.Copy(backupPath, targetPath, true);
-                throw;
-            }
+            await ApplyUpdateFilesAsync(targetPath, packagePath, expectedSha256, backupPath);
             Process.Start(new ProcessStartInfo(targetPath, $"--update-complete {version}") { UseShellExecute = true });
             return 0;
         }
@@ -179,6 +169,59 @@ internal sealed class LauncherSelfUpdateService(HttpClient client)
             }
             catch { }
             return 1;
+        }
+    }
+
+    internal static async Task ApplyUpdateFilesAsync(
+        string targetPath,
+        string packagePath,
+        string expectedSha256,
+        string backupPath,
+        Action<string, string, bool>? moveFile = null)
+    {
+        await using (var stream = File.OpenRead(packagePath))
+        {
+            var actual = Convert.ToHexString(await SHA256.HashDataAsync(stream));
+            if (!actual.Equals(expectedSha256, StringComparison.OrdinalIgnoreCase))
+            {
+                throw new InvalidDataException("The staged update hash changed before installation.");
+            }
+        }
+
+        Directory.CreateDirectory(Path.GetDirectoryName(backupPath)!);
+        var replacementPath = targetPath + ".new";
+        File.Copy(packagePath, replacementPath, true);
+        File.Copy(targetPath, backupPath, true);
+        try
+        {
+            (moveFile ?? File.Move)(replacementPath, targetPath, true);
+        }
+        catch
+        {
+            File.Copy(backupPath, targetPath, true);
+            throw;
+        }
+        finally
+        {
+            if (File.Exists(replacementPath))
+            {
+                File.Delete(replacementPath);
+            }
+        }
+    }
+
+    private static void TryDeleteDirectory(string path)
+    {
+        try
+        {
+            if (Directory.Exists(path))
+            {
+                Directory.Delete(path, true);
+            }
+        }
+        catch
+        {
+            // Cleanup must not hide the original update failure.
         }
     }
 

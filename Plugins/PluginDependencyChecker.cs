@@ -6,12 +6,12 @@ internal sealed record DependencyCheckResult(string Requirement, bool IsSatisfie
 
 internal static class PluginDependencyChecker
 {
-    public static IReadOnlyList<DependencyCheckResult> Check(IEnumerable<string>? requirements, string pluginRoot)
+    public static IReadOnlyList<DependencyCheckResult> Check(IEnumerable<string>? requirements, string pluginRoot, Func<bool>? cudaProbe = null)
     {
-        return (requirements ?? []).Where(value => !string.IsNullOrWhiteSpace(value)).Select(value => CheckOne(value.Trim(), pluginRoot)).ToArray();
+        return (requirements ?? []).Where(value => !string.IsNullOrWhiteSpace(value)).Select(value => CheckOne(value.Trim(), pluginRoot, cudaProbe)).ToArray();
     }
 
-    private static DependencyCheckResult CheckOne(string requirement, string pluginRoot)
+    private static DependencyCheckResult CheckOne(string requirement, string pluginRoot, Func<bool>? cudaProbe)
     {
         if (requirement.StartsWith("command:", StringComparison.OrdinalIgnoreCase))
         {
@@ -35,7 +35,7 @@ internal static class PluginDependencyChecker
         }
         if (requirement.Equals("cuda", StringComparison.OrdinalIgnoreCase))
         {
-            var available = SystemResourceProbe.ReadGpuMemory() is not null;
+            var available = cudaProbe?.Invoke() ?? SystemResourceProbe.ReadGpuMemory() is not null;
             return new DependencyCheckResult(requirement, available, true, available ? "NVIDIA CUDA-capable GPU detected." : "nvidia-smi is unavailable.");
         }
         if (requirement.StartsWith("python", StringComparison.OrdinalIgnoreCase))

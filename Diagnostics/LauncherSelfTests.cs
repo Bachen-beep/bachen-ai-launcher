@@ -107,6 +107,29 @@ internal static class LauncherSelfTests
             var previewManifestUri = await updateService.ResolveManifestUriAsync(LauncherUpdateChannel.Preview);
             Assert(previewManifestUri.AbsoluteUri.Contains("stage2-preview/launcher-update.json", StringComparison.Ordinal), "Preview update channel resolution", lines);
 
+            var offlineDataPath = Path.Combine(testRoot, "offline-existing-plugin.dat");
+            await File.WriteAllTextAsync(offlineDataPath, "preserve", Encoding.ASCII);
+            using (var offlineClient = new HttpClient(new FailureHandler(new HttpRequestException("simulated offline network"))))
+            {
+                var offlineService = new LauncherSelfUpdateService(offlineClient);
+                await AssertThrowsAsync(
+                    () => offlineService.CheckAsync(LauncherUpdateChannel.Stable),
+                    "Offline update failure isolation",
+                    lines);
+            }
+            Assert(File.ReadAllText(offlineDataPath, Encoding.ASCII) == "preserve", "Offline failure preserves plugin data", lines);
+
+            var interruptedRoot = Path.Combine(testRoot, "interrupted-download");
+            using (var interruptedClient = new HttpClient(new FailureHandler(new IOException("simulated interrupted download"))))
+            {
+                var interruptedService = new LauncherSelfUpdateService(interruptedClient);
+                await AssertThrowsAsync(
+                    () => interruptedService.DownloadVerifiedAsync(launcherUpdate, interruptedRoot),
+                    "Interrupted update download rejection",
+                    lines);
+            }
+            Assert(!Directory.Exists(interruptedRoot), "Interrupted update staging cleanup", lines);
+
             Assert(PluginManifestSignatureVerifier.Verify(manifest, publishers).IsTrusted, "Signed manifest verification", lines);
             Assert(manifest.SchemaVersion == 3 && manifest.RequiresLicenseAcceptance, "Plugin license metadata", lines);
             manifest.Description += " tampered";
@@ -129,6 +152,33 @@ internal static class LauncherSelfTests
                 [12001],
                 [12001, 12002]);
             Assert(assessment.BlocksLaunch && assessment.ManagedProcessIds.Contains(12001) && assessment.UnknownPortProcessIds.Contains(12002), "Resource and port conflict scheduling", lines);
+            var noGpuDependencies = PluginDependencyChecker.Check(["cuda"], install.Definition.RootDirectory, () => false);
+            Assert(noGpuDependencies is [{ IsSatisfied: false, IsEnforced: true }], "No-GPU dependency detection", lines);
+
+            var currentLauncherPath = Path.Combine(testRoot, "BaChen AI Launcher.exe");
+            var stagedLauncherPath = Path.Combine(testRoot, "BaChen AI Launcher staged.exe");
+            var launcherBackupPath = Path.Combine(testRoot, "update-backup", "BaChen AI Launcher.previous.exe");
+            await File.WriteAllTextAsync(currentLauncherPath, "previous-version", Encoding.ASCII);
+            await File.WriteAllTextAsync(stagedLauncherPath, "next-version", Encoding.ASCII);
+            var stagedHash = Convert.ToHexString(SHA256.HashData(Encoding.ASCII.GetBytes("next-version")));
+            await AssertThrowsAsync(
+                () => LauncherSelfUpdateService.ApplyUpdateFilesAsync(
+                    currentLauncherPath,
+                    stagedLauncherPath,
+                    stagedHash,
+                    launcherBackupPath,
+                    (source, destination, overwrite) =>
+                    {
+                        File.Delete(destination);
+                        throw new IOException("simulated replacement interruption");
+                    }),
+                "Interrupted replacement failure detection",
+                lines);
+            Assert(File.ReadAllText(currentLauncherPath, Encoding.ASCII) == "previous-version", "Interrupted replacement automatic restore", lines);
+            Assert(!File.Exists(currentLauncherPath + ".new"), "Interrupted replacement cleanup", lines);
+            await LauncherSelfUpdateService.ApplyUpdateFilesAsync(currentLauncherPath, stagedLauncherPath, stagedHash, launcherBackupPath);
+            Assert(File.ReadAllText(currentLauncherPath, Encoding.ASCII) == "next-version", "Atomic launcher replacement", lines);
+            Assert(File.ReadAllText(launcherBackupPath, Encoding.ASCII) == "previous-version", "Launcher rollback backup preservation", lines);
 
             var uninstall = packageService.Uninstall(install.Definition, dataRoot);
             Assert(uninstall.FilesMoved && uninstall.BackupPath is not null && Directory.Exists(uninstall.BackupPath), "Recoverable plugin uninstall", lines);
@@ -204,6 +254,20 @@ internal static class LauncherSelfTests
         throw new InvalidOperationException($"Self-test assertion failed: {name}");
     }
 
+    private static async Task AssertThrowsAsync(Func<Task> action, string name, ICollection<string> lines)
+    {
+        try
+        {
+            await action();
+        }
+        catch
+        {
+            lines.Add("PASS: " + name);
+            return;
+        }
+        throw new InvalidOperationException($"Self-test assertion failed: {name}");
+    }
+
     private static async Task WriteReportAsync(string reportPath, IEnumerable<string> lines)
     {
         var fullPath = Path.GetFullPath(reportPath);
@@ -218,5 +282,11 @@ internal static class LauncherSelfTests
             {
                 Content = new StringContent(json, Encoding.UTF8, "application/json")
             });
+    }
+
+    private sealed class FailureHandler(Exception exception) : HttpMessageHandler
+    {
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+            => Task.FromException<HttpResponseMessage>(exception);
     }
 }
