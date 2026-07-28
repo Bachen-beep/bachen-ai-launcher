@@ -42,6 +42,11 @@ VersionInfoCopyright=Copyright (c) 2026 Bachen
 
 [Languages]
 Name: "english"; MessagesFile: "compiler:Default.isl"
+Name: "chinesesimp"; MessagesFile: "{#SourceRoot}\installer\Languages\ChineseSimplified.isl"
+
+[CustomMessages]
+english.RemoveUserDataPrompt=Also remove BaChen AI Launcher settings and the default plugin data directory?%n%nThis permanently deletes files under LocalAppData and Documents. Custom data directories are never deleted automatically.%n%nChoose No to preserve all data (recommended).
+chinesesimp.RemoveUserDataPrompt=是否同时删除 BaChen AI Launcher 设置和默认插件数据目录？%n%n这会永久删除 LocalAppData 和 Documents 下的相关文件。自定义数据目录不会被自动删除。%n%n建议选择“否”以保留全部数据。
 
 [Tasks]
 Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}"; Flags: unchecked
@@ -58,3 +63,17 @@ Name: "{autodesktop}\{#AppName}"; Filename: "{app}\{#AppExeName}"; Tasks: deskto
 
 [Run]
 Filename: "{app}\{#AppExeName}"; Description: "{cm:LaunchProgram,{#StringChange(AppName, '&', '&&')}}"; Flags: nowait postinstall skipifsilent
+
+[Code]
+procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
+begin
+  if CurUninstallStep = usPostUninstall then
+  begin
+    if SuppressibleMsgBox(ExpandConstant('{cm:RemoveUserDataPrompt}'), mbConfirmation,
+      MB_YESNO or MB_DEFBUTTON2, IDNO) = IDYES then
+    begin
+      DelTree(ExpandConstant('{localappdata}\BaChen AI Launcher'), True, True, True);
+      DelTree(ExpandConstant('{userdocs}\BaChen AI Launcher Data'), True, True, True);
+    end;
+  end;
+end;

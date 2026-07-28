@@ -19,6 +19,10 @@ The launcher uses the Microsoft .NET runtime when published as a self-contained
 Windows executable. Applicable Microsoft notices are supplied by the .NET
 distribution and remain governed by Microsoft's license terms.
 
+The installer includes the Simplified Chinese language file distributed with
+the official Inno Setup source tree. The translation is maintained by Zhenghan
+Yang (Kira) and is used under the Inno Setup distribution terms.
+
 Audit basis: local plugin trees inspected on 2026-07-28. Upstream licenses may
 change; refresh this audit before every public release that changes supported
 plugins or download sources.
