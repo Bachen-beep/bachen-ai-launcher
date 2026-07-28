@@ -29,10 +29,13 @@
 - Installer upgrades preserve configuration and plugin data by default.
 - Persistent logs rotate, and diagnostics can be exported with sensitive paths
   and environment values redacted.
-- Public releases should be Authenticode signed. Unsigned development builds
-  remain clearly identified and are not treated as production-ready.
 - Preview and production releases must create GitHub Artifact Attestations for
   both executable artifacts so users can verify repository and workflow origin.
+- Production releases may be published without Authenticode when the release
+  notes clearly disclose the Windows SmartScreen limitation. Authenticode is a
+  future publisher-identity enhancement, not the Stage Two release gate.
+- The release workflow must download its published assets, verify all listed
+  SHA-256 values, and verify both Artifact Attestations before succeeding.
 
 ## Clean-machine matrix
 
@@ -44,7 +47,8 @@ and uninstall while preserving data.
 
 ## Release gate
 
-Do not publish a production release until an OV or EV Windows code-signing
-certificate is configured. RSA signatures used for update metadata and plugin
-manifests protect launcher data, but do not replace Authenticode reputation or
-publisher identity.
+Do not publish a production release until all required clean-machine rows have
+recorded evidence. RSA signatures protect update metadata, SHA-256 protects the
+downloaded bytes, and GitHub Artifact Attestation proves build provenance.
+These controls do not provide Authenticode publisher identity or suppress
+Windows SmartScreen warnings.

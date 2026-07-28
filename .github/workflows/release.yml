@@ -34,8 +34,13 @@ jobs:
             throw "Tag version $($Matches.version) does not match project version $($project.Project.PropertyGroup.Version[0])."
           }
           $isPrerelease = -not [string]::IsNullOrEmpty($Matches.suffix)
+          $releaseNotes = "Docs/ReleaseNotes-$($Matches.version)$($Matches.suffix).md"
+          if (-not (Test-Path $releaseNotes)) {
+            throw "Release notes are required for $tag: $releaseNotes"
+          }
           "version=$($Matches.version)" >> $env:GITHUB_OUTPUT
           "prerelease=$($isPrerelease.ToString().ToLowerInvariant())" >> $env:GITHUB_OUTPUT
+          "release_notes=$releaseNotes" >> $env:GITHUB_OUTPUT
 
       - name: Build and self-test
         shell: pwsh
@@ -139,9 +144,32 @@ jobs:
         with:
           prerelease: ${{ steps.version.outputs.prerelease }}
           generate_release_notes: true
-          body_path: Docs/ReleaseNotes-0.12.1-stage2-preview.md
+          body_path: ${{ steps.version.outputs.release_notes }}
           files: |
             artifacts/BaChen.AI.Launcher.exe
             artifacts/installer/BaChen-AI-Launcher-Setup-${{ steps.version.outputs.version }}.exe
             artifacts/launcher-update.json
             artifacts/SHA256SUMS.txt
+
+      - name: Verify published assets and attestations
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $verifyRoot = Join-Path $env:RUNNER_TEMP "published-release"
+          New-Item -ItemType Directory -Path $verifyRoot | Out-Null
+          gh release download "${{ github.ref_name }}" --repo "${{ github.repository }}" --dir $verifyRoot
+          $expected = @{}
+          foreach ($line in Get-Content (Join-Path $verifyRoot "SHA256SUMS.txt")) {
+            if ($line -match '^(?<hash>[A-Fa-f0-9]{64})\s{2}(?<name>.+)$') {
+              $expected[$Matches.name] = $Matches.hash
+            }
+          }
+          foreach ($name in @("BaChen.AI.Launcher.exe", "BaChen-AI-Launcher-Setup-${{ steps.version.outputs.version }}.exe", "launcher-update.json")) {
+            $actual = (Get-FileHash (Join-Path $verifyRoot $name) -Algorithm SHA256).Hash
+            if (-not $expected.ContainsKey($name) -or $actual -ne $expected[$name]) {
+              throw "Published SHA-256 verification failed for $name."
+            }
+          }
+          gh attestation verify (Join-Path $verifyRoot "BaChen.AI.Launcher.exe") --repo "${{ github.repository }}"
+          gh attestation verify (Join-Path $verifyRoot "BaChen-AI-Launcher-Setup-${{ steps.version.outputs.version }}.exe") --repo "${{ github.repository }}"

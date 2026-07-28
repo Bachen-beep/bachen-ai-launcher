@@ -13,10 +13,12 @@ internal sealed record LauncherUpdateCheck(LauncherUpdateManifest Manifest, Vers
 internal sealed class LauncherSelfUpdateService(HttpClient client)
 {
     public static readonly Uri DefaultManifestUri = new("https://github.com/Bachen-beep/bachen-ai-launcher/releases/latest/download/launcher-update.json");
+    private static readonly Uri ReleasesApiUri = new("https://api.github.com/repos/Bachen-beep/bachen-ai-launcher/releases?per_page=20");
 
-    public async Task<LauncherUpdateCheck> CheckAsync(Uri? manifestUri = null)
+    public async Task<LauncherUpdateCheck> CheckAsync(LauncherUpdateChannel channel = LauncherUpdateChannel.Stable, Uri? manifestUri = null)
     {
-        var json = await client.GetStringAsync(manifestUri ?? DefaultManifestUri);
+        var resolvedManifestUri = manifestUri ?? await ResolveManifestUriAsync(channel);
+        var json = await client.GetStringAsync(resolvedManifestUri);
         var manifest = JsonSerializer.Deserialize<LauncherUpdateManifest>(json, new JsonSerializerOptions { PropertyNameCaseInsensitive = true })
             ?? throw new InvalidDataException("The launcher update manifest is empty.");
         LauncherUpdateManifestVerifier.Validate(manifest, ReadEmbeddedPublicKey());
@@ -28,6 +30,37 @@ internal sealed class LauncherSelfUpdateService(HttpClient client)
             throw new InvalidOperationException($"This update requires launcher {minimum} or newer. Install the latest setup package manually.");
         }
         return new LauncherUpdateCheck(manifest, current, latest);
+    }
+
+    internal async Task<Uri> ResolveManifestUriAsync(LauncherUpdateChannel channel)
+    {
+        if (channel == LauncherUpdateChannel.Stable)
+        {
+            return DefaultManifestUri;
+        }
+
+        await using var stream = await client.GetStreamAsync(ReleasesApiUri);
+        using var document = await JsonDocument.ParseAsync(stream);
+        foreach (var release in document.RootElement.EnumerateArray())
+        {
+            if (release.GetProperty("draft").GetBoolean() || !release.GetProperty("prerelease").GetBoolean())
+            {
+                continue;
+            }
+            foreach (var asset in release.GetProperty("assets").EnumerateArray())
+            {
+                if (!asset.GetProperty("name").GetString()!.Equals("launcher-update.json", StringComparison.OrdinalIgnoreCase))
+                {
+                    continue;
+                }
+                var downloadUrl = asset.GetProperty("browser_download_url").GetString();
+                if (Uri.TryCreate(downloadUrl, UriKind.Absolute, out var uri) && uri.Scheme == Uri.UriSchemeHttps)
+                {
+                    return uri;
+                }
+            }
+        }
+        throw new InvalidOperationException("No preview launcher release with an update manifest is available.");
     }
 
     public async Task<string> DownloadVerifiedAsync(LauncherUpdateManifest manifest)

@@ -87,6 +87,26 @@ internal static class LauncherSelfTests
             AssertThrows(() => LauncherUpdateManifestVerifier.Validate(launcherUpdate, rsa.ExportSubjectPublicKeyInfoPem()), "Launcher update tamper detection", lines);
             launcherUpdate.Sha256 = new string('A', 64);
 
+            var previewReleaseJson = """
+                [
+                  {
+                    "draft": false,
+                    "prerelease": true,
+                    "assets": [
+                      {
+                        "name": "launcher-update.json",
+                        "browser_download_url": "https://github.com/Bachen-beep/bachen-ai-launcher/releases/download/v99.0.0-stage2-preview/launcher-update.json"
+                      }
+                    ]
+                  }
+                ]
+                """;
+            using var updateClient = new HttpClient(new StaticJsonHandler(previewReleaseJson));
+            var updateService = new LauncherSelfUpdateService(updateClient);
+            Assert((await updateService.ResolveManifestUriAsync(LauncherUpdateChannel.Stable)) == LauncherSelfUpdateService.DefaultManifestUri, "Stable update channel resolution", lines);
+            var previewManifestUri = await updateService.ResolveManifestUriAsync(LauncherUpdateChannel.Preview);
+            Assert(previewManifestUri.AbsoluteUri.Contains("stage2-preview/launcher-update.json", StringComparison.Ordinal), "Preview update channel resolution", lines);
+
             Assert(PluginManifestSignatureVerifier.Verify(manifest, publishers).IsTrusted, "Signed manifest verification", lines);
             Assert(manifest.SchemaVersion == 3 && manifest.RequiresLicenseAcceptance, "Plugin license metadata", lines);
             manifest.Description += " tampered";
@@ -118,6 +138,11 @@ internal static class LauncherSelfTests
             LauncherConfigurationStore.SaveAtomic(settingsPath, expectedSettings);
             var loadedSettings = LauncherConfigurationStore.LoadOrCreate(settingsPath, () => new LauncherSettings());
             Assert(loadedSettings.WooshPort == 18001 && File.Exists(settingsPath), "Atomic configuration save and load", lines);
+            Assert(loadedSettings.LauncherUpdateChannel == LauncherUpdateChannel.Stable, "Stable update channel default", lines);
+            loadedSettings.LauncherUpdateChannel = LauncherUpdateChannel.Preview;
+            LauncherConfigurationStore.SaveAtomic(settingsPath, loadedSettings);
+            var previewSettings = LauncherConfigurationStore.LoadOrCreate(settingsPath, () => new LauncherSettings());
+            Assert(previewSettings.LauncherUpdateChannel == LauncherUpdateChannel.Preview, "Preview update channel persistence", lines);
             await File.WriteAllTextAsync(settingsPath, "{ invalid json", Encoding.UTF8);
             _ = LauncherConfigurationStore.LoadOrCreate(settingsPath, () => new LauncherSettings());
             Assert(Directory.EnumerateFiles(Path.Combine(Path.GetDirectoryName(settingsPath)!, "backups", "corrupt-config")).Any(), "Corrupt configuration archival", lines);
@@ -184,5 +209,14 @@ internal static class LauncherSelfTests
         var fullPath = Path.GetFullPath(reportPath);
         Directory.CreateDirectory(Path.GetDirectoryName(fullPath)!);
         await File.WriteAllLinesAsync(fullPath, lines, Encoding.UTF8);
+    }
+
+    private sealed class StaticJsonHandler(string json) : HttpMessageHandler
+    {
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+            => Task.FromResult(new HttpResponseMessage(System.Net.HttpStatusCode.OK)
+            {
+                Content = new StringContent(json, Encoding.UTF8, "application/json")
+            });
     }
 }

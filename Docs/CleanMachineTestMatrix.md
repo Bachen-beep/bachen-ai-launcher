@@ -22,7 +22,9 @@
 | No NVIDIA GPU | Pending external VM | Launcher opens and reports GPU limitation without crashing |
 | Offline and proxy-restricted network | Partially covered | Clear update error; installed plugins remain usable |
 | Interrupted launcher update | Pending release asset | Current EXE restored or preserved |
-| Authenticode reputation | Blocked by certificate | Both launcher and installer show a valid publisher |
+| Artifact Attestation | Pass | Launcher and installer provenance verified for `v0.12.1-stage2-preview` |
+| Windows SmartScreen disclosure | Required for each release | Release notes state that Artifact Attestation does not provide publisher reputation |
 
 Do not promote a preview tag to a production release until all pending rows have
 recorded machine details, artifact hash, date, result, and any retained logs.
+Authenticode remains optional and does not replace these test results.

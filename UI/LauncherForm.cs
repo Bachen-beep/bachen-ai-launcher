@@ -1386,7 +1386,7 @@ internal sealed class LauncherForm : Form
         {
             SetRuntimePhase("正在检查启动器更新", "Checking launcher updates");
             AppendLog(L("正在验证启动器更新清单……", "Verifying launcher update manifest..."));
-            var check = await _launcherUpdateService.CheckAsync();
+            var check = await _launcherUpdateService.CheckAsync(_settings.LauncherUpdateChannel);
             if (!check.IsUpdateAvailable)
             {
                 MessageBox.Show(L($"当前版本 {check.CurrentVersion.ToString(3)} 已是最新版本。", $"Version {check.CurrentVersion.ToString(3)} is up to date."), L("启动器更新", "Launcher update"), MessageBoxButtons.OK, MessageBoxIcon.Information);
@@ -1428,7 +1428,7 @@ internal sealed class LauncherForm : Form
         _updateBusy = true;
         try
         {
-            var check = await _launcherUpdateService.CheckAsync();
+            var check = await _launcherUpdateService.CheckAsync(_settings.LauncherUpdateChannel);
             if (!check.IsUpdateAvailable || _settings.SkippedLauncherVersion == check.LatestVersion.ToString(3)) return;
             var choice = ShowLauncherUpdatePrompt(check);
             if (choice == LauncherUpdateChoice.Install)
@@ -1934,6 +1934,26 @@ internal sealed class LauncherForm : Form
         };
         dialog.Controls.Add(automaticUpdates);
 
+        var updateChannelLabel = new Label
+        {
+            Text = L("启动器更新通道", "Launcher update channel"),
+            Location = new Point(560, 442),
+            Size = new Size(180, 30),
+            TextAlign = ContentAlignment.MiddleLeft,
+            ForeColor = Theme.Ink,
+            BackColor = Theme.Card
+        };
+        var updateChannel = new ComboBox
+        {
+            DropDownStyle = ComboBoxStyle.DropDownList,
+            Location = new Point(742, 442),
+            Size = new Size(170, 30)
+        };
+        updateChannel.Items.AddRange([L("稳定版", "Stable"), L("预览版", "Preview")]);
+        updateChannel.SelectedIndex = _settings.LauncherUpdateChannel == LauncherUpdateChannel.Preview ? 1 : 0;
+        dialog.Controls.Add(updateChannelLabel);
+        dialog.Controls.Add(updateChannel);
+
         var note = new Label
         {
             AutoSize = false,
@@ -1966,9 +1986,15 @@ internal sealed class LauncherForm : Form
             StablePort = (int)stablePort.Value,
             IndexTtsPort = (int)indexPort.Value
             ,AutomaticallyCheckLauncherUpdates = automaticUpdates.Checked
+            ,LauncherUpdateChannel = updateChannel.SelectedIndex == 1 ? LauncherUpdateChannel.Preview : LauncherUpdateChannel.Stable
             ,SkippedLauncherVersion = _settings.SkippedLauncherVersion
             ,LauncherUpdateDeferredUntil = _settings.LauncherUpdateDeferredUntil
         };
+        if (updated.LauncherUpdateChannel != _settings.LauncherUpdateChannel)
+        {
+            updated.SkippedLauncherVersion = string.Empty;
+            updated.LauncherUpdateDeferredUntil = null;
+        }
         var builtInPorts = new[] { updated.WooshPort, updated.StablePort, updated.IndexTtsPort };
         if (builtInPorts.Distinct().Count() != builtInPorts.Length)
         {

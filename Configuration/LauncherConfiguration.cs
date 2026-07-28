@@ -49,8 +49,15 @@ internal sealed class LauncherSettings
     public int StablePort { get; set; } = 7861;
     public int IndexTtsPort { get; set; } = 7862;
     public bool AutomaticallyCheckLauncherUpdates { get; set; } = true;
+    public LauncherUpdateChannel LauncherUpdateChannel { get; set; } = LauncherUpdateChannel.Stable;
     public string SkippedLauncherVersion { get; set; } = string.Empty;
     public DateTimeOffset? LauncherUpdateDeferredUntil { get; set; }
+}
+
+internal enum LauncherUpdateChannel
+{
+    Stable,
+    Preview
 }
 
 internal sealed class LauncherModelCatalog
