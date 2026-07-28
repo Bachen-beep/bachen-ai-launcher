@@ -789,6 +789,7 @@ internal sealed class LauncherForm : Form
     private readonly PluginPackageService _pluginPackageService = new(GitHubClient);
     private readonly GitHubUpdateService _sourceUpdateService = new(GitHubClient);
     private readonly LauncherSelfUpdateService _launcherUpdateService = new(GitHubClient);
+    private readonly LauncherDiagnosticsService _diagnosticsService = new();
     private LauncherSettings _settings;
     private LauncherModelCatalog _modelCatalog = new();
     private TrustedPublisherStore _trustedPublishers = new();
@@ -2077,6 +2078,7 @@ internal sealed class LauncherForm : Form
         menu.Items.Add(L("恢复源码备份", "Restore source backup"), null, async (_, _) => await RestoreBackupAsync());
         menu.Items.Add(L("恢复插件版本", "Restore plugin version"), null, (_, _) => RestorePluginVersion());
         menu.Items.Add(L("打开日志目录", "Open logs folder"), null, (_, _) => OpenLogsFolder());
+        menu.Items.Add(L("导出诊断包", "Export diagnostics"), null, (_, _) => ExportDiagnostics());
         menu.Items.Add(new ToolStripSeparator());
         menu.Items.Add(L($"启动器版本 {LauncherVersion}", $"Launcher version {LauncherVersion}"))!.Enabled = false;
         return menu;
@@ -4017,6 +4019,32 @@ internal sealed class LauncherForm : Form
             || message.Contains("error", StringComparison.OrdinalIgnoreCase)
             || message.Contains("exception", StringComparison.OrdinalIgnoreCase);
         _logEntries.Add(new LauncherLogEntry(DateTime.Now, message, service?.Name ?? _activeService?.Name, error));
+        _diagnosticsService.Append(message, service?.Name ?? _activeService?.Name, error);
         RenderLog();
+    }
+
+    private void ExportDiagnostics()
+    {
+        using var dialog = new SaveFileDialog
+        {
+            Title = L("导出诊断日志", "Export diagnostics"),
+            Filter = "Text files (*.txt)|*.txt|All files (*.*)|*.*",
+            FileName = $"bachen-launcher-diagnostics-{DateTime.Now:yyyyMMdd-HHmmss}.txt"
+        };
+        if (dialog.ShowDialog(this) != DialogResult.OK) return;
+        var lines = new List<string>
+        {
+            $"Launcher version: {LauncherVersion}",
+            $"OS: {Environment.OSVersion}",
+            $"64-bit OS: {Environment.Is64BitOperatingSystem}",
+            $"Process architecture: {System.Runtime.InteropServices.RuntimeInformation.ProcessArchitecture}",
+            $"Data root: {_settings.DataRoot}",
+            $"Timestamp: {DateTimeOffset.Now:O}",
+            "",
+            "Runtime log:"
+        };
+        lines.AddRange(_logEntries.Select(entry => $"[{entry.Timestamp:O}] [{entry.ServiceName ?? "Launcher"}] {(entry.IsError ? "ERROR" : "INFO")} {entry.Message}"));
+        var output = _diagnosticsService.Export(dialog.FileName, lines);
+        MessageBox.Show(L($"诊断包已导出：\n{output}", $"Diagnostics exported to:\n{output}"), L("导出完成", "Export complete"), MessageBoxButtons.OK, MessageBoxIcon.Information);
     }
 }

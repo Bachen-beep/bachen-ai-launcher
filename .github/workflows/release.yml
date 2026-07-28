@@ -1,0 +1,129 @@
+name: Signed Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Validate release version
+        id: version
+        shell: pwsh
+        run: |
+          $tag = "${{ github.ref_name }}"
+          if ($tag -notmatch '^v(?<version>\d+\.\d+\.\d+)(?<suffix>-.+)?$') { throw "Invalid release tag: $tag" }
+          [xml]$project = Get-Content ".\BaChen AI Launcher.csproj"
+          if ($project.Project.PropertyGroup.Version[0] -ne $Matches.version) {
+            throw "Tag version $($Matches.version) does not match project version $($project.Project.PropertyGroup.Version[0])."
+          }
+          "version=$($Matches.version)" >> $env:GITHUB_OUTPUT
+          "prerelease=$([bool]$Matches.suffix)".ToLowerInvariant() >> $env:GITHUB_OUTPUT
+
+      - name: Build and self-test
+        shell: pwsh
+        run: |
+          dotnet build ".\BaChen AI Launcher.csproj" -c Release
+          $report = Join-Path $env:RUNNER_TEMP "launcher-self-tests.txt"
+          dotnet ".\bin\Release\net10.0-windows\BaChen AI Launcher.dll" --self-test $report
+          if ($LASTEXITCODE -ne 0) { Get-Content $report; exit $LASTEXITCODE }
+          Get-Content $report
+          .\scripts\Publish.ps1
+
+      - name: Restore Authenticode certificate
+        id: certificate
+        shell: pwsh
+        env:
+          CERTIFICATE_BASE64: ${{ secrets.WINDOWS_SIGNING_PFX_BASE64 }}
+        run: |
+          if ([string]::IsNullOrWhiteSpace($env:CERTIFICATE_BASE64)) {
+            if ("${{ steps.version.outputs.prerelease }}" -eq "false") { throw "Production tags require WINDOWS_SIGNING_PFX_BASE64." }
+            "available=false" >> $env:GITHUB_OUTPUT
+            exit 0
+          }
+          $path = Join-Path $env:RUNNER_TEMP "bachen-signing.pfx"
+          [IO.File]::WriteAllBytes($path, [Convert]::FromBase64String($env:CERTIFICATE_BASE64))
+          "available=true" >> $env:GITHUB_OUTPUT
+          "path=$path" >> $env:GITHUB_OUTPUT
+
+      - name: Authenticode sign launcher
+        if: steps.certificate.outputs.available == 'true'
+        shell: pwsh
+        env:
+          PFX_PASSWORD: ${{ secrets.WINDOWS_SIGNING_PFX_PASSWORD }}
+        run: |
+          $signTool = Get-ChildItem "${env:ProgramFiles(x86)}\Windows Kits\10\bin" -Filter signtool.exe -Recurse |
+            Where-Object FullName -Match '\\x64\\' | Sort-Object FullName -Descending | Select-Object -First 1
+          if (-not $signTool) { throw "signtool.exe was not found." }
+          & $signTool.FullName sign /fd SHA256 /td SHA256 /tr http://timestamp.digicert.com /f "${{ steps.certificate.outputs.path }}" /p $env:PFX_PASSWORD ".\artifacts\release\BaChen AI Launcher.exe"
+          if ($LASTEXITCODE -ne 0) { throw "Launcher signing failed." }
+          $signature = Get-AuthenticodeSignature ".\artifacts\release\BaChen AI Launcher.exe"
+          if ($signature.Status -ne "Valid") { throw "Launcher signature verification failed: $($signature.Status)" }
+
+      - name: Install Inno Setup
+        run: choco install innosetup --no-progress -y
+
+      - name: Build installer and update manifest
+        shell: pwsh
+        env:
+          UPDATE_PRIVATE_KEY_BASE64: ${{ secrets.LAUNCHER_UPDATE_PRIVATE_KEY_BASE64 }}
+        run: |
+          if ([string]::IsNullOrWhiteSpace($env:UPDATE_PRIVATE_KEY_BASE64)) { throw "LAUNCHER_UPDATE_PRIVATE_KEY_BASE64 is required." }
+          $version = "${{ steps.version.outputs.version }}"
+          $tag = "${{ github.ref_name }}"
+          .\scripts\Build-Installer.ps1 -Version $version
+          Copy-Item ".\artifacts\release\BaChen AI Launcher.exe" ".\artifacts\BaChen.AI.Launcher.exe"
+          $keyPath = Join-Path $env:RUNNER_TEMP "launcher-update-private.pem"
+          [IO.File]::WriteAllBytes($keyPath, [Convert]::FromBase64String($env:UPDATE_PRIVATE_KEY_BASE64))
+          .\scripts\New-UpdateManifest.ps1 `
+            -Version $version `
+            -ExecutablePath ".\artifacts\BaChen.AI.Launcher.exe" `
+            -DownloadUrl "https://github.com/${{ github.repository }}/releases/download/$tag/BaChen.AI.Launcher.exe" `
+            -ReleaseNotesUrl "https://github.com/${{ github.repository }}/releases/tag/$tag" `
+            -PrivateKeyPath $keyPath `
+            -OutputPath ".\artifacts\launcher-update.json"
+          $installer = Get-Item ".\artifacts\installer\BaChen-AI-Launcher-Setup-$version.exe"
+          $checksums = @(
+            "$((Get-FileHash '.\artifacts\BaChen.AI.Launcher.exe' -Algorithm SHA256).Hash)  BaChen.AI.Launcher.exe",
+            "$((Get-FileHash $installer.FullName -Algorithm SHA256).Hash)  $($installer.Name)",
+            "$((Get-FileHash '.\artifacts\launcher-update.json' -Algorithm SHA256).Hash)  launcher-update.json"
+          )
+          [IO.File]::WriteAllLines((Join-Path $PWD "artifacts\SHA256SUMS.txt"), $checksums)
+
+      - name: Authenticode sign installer
+        if: steps.certificate.outputs.available == 'true'
+        shell: pwsh
+        env:
+          PFX_PASSWORD: ${{ secrets.WINDOWS_SIGNING_PFX_PASSWORD }}
+        run: |
+          $signTool = Get-ChildItem "${env:ProgramFiles(x86)}\Windows Kits\10\bin" -Filter signtool.exe -Recurse |
+            Where-Object FullName -Match '\\x64\\' | Sort-Object FullName -Descending | Select-Object -First 1
+          $installer = Get-Item ".\artifacts\installer\BaChen-AI-Launcher-Setup-${{ steps.version.outputs.version }}.exe"
+          & $signTool.FullName sign /fd SHA256 /td SHA256 /tr http://timestamp.digicert.com /f "${{ steps.certificate.outputs.path }}" /p $env:PFX_PASSWORD $installer.FullName
+          if ($LASTEXITCODE -ne 0) { throw "Installer signing failed." }
+          if ((Get-AuthenticodeSignature $installer.FullName).Status -ne "Valid") { throw "Installer signature verification failed." }
+
+      - name: Publish GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          prerelease: ${{ steps.version.outputs.prerelease }}
+          generate_release_notes: true
+          files: |
+            artifacts/BaChen.AI.Launcher.exe
+            artifacts/installer/BaChen-AI-Launcher-Setup-${{ steps.version.outputs.version }}.exe
+            artifacts/launcher-update.json
+            artifacts/SHA256SUMS.txt
