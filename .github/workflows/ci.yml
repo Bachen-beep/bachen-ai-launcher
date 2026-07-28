@@ -81,6 +81,13 @@ jobs:
         run: |
           .\scripts\Publish.ps1
           $report = Join-Path $env:RUNNER_TEMP "published-launcher-self-tests.txt"
-          & ".\artifacts\release\BaChen AI Launcher.exe" --self-test $report
-          if ($LASTEXITCODE -ne 0) { Get-Content $report; exit $LASTEXITCODE }
+          $process = Start-Process `
+            -FilePath ".\artifacts\release\BaChen AI Launcher.exe" `
+            -ArgumentList @("--self-test", "`"$report`"") `
+            -Wait `
+            -PassThru
+          if ($process.ExitCode -ne 0) {
+            if (Test-Path $report) { Get-Content $report }
+            exit $process.ExitCode
+          }
           Get-Content $report
