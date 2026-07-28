@@ -7,7 +7,7 @@ using System.Text;
 using System.Text.Json;
 using System.Xml.Linq;
 
-namespace AiAudioLauncher;
+namespace BaChenAiLauncher;
 
 internal static class Program
 {
@@ -810,6 +810,11 @@ internal enum LauncherLogFilter
 
 internal static class LauncherPaths
 {
+    private const string ConfigEnvironmentVariable = "BACHEN_AI_CONFIG_DIR";
+    private const string DataEnvironmentVariable = "BACHEN_AI_DATA_ROOT";
+    private const string LegacyConfigEnvironmentVariable = "BACHEN_AI_AUDIO_CONFIG_DIR";
+    private const string LegacyDataEnvironmentVariable = "BACHEN_AI_AUDIO_DATA_ROOT";
+
     private static readonly string UserProfileDirectory =
         Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
 
@@ -817,19 +822,33 @@ internal static class LauncherPaths
         Path.GetDirectoryName(Environment.ProcessPath) ?? AppContext.BaseDirectory;
 
     public static string UserConfigDirectory { get; } =
-        Environment.GetEnvironmentVariable("BACHEN_AI_AUDIO_CONFIG_DIR") is { Length: > 0 } configured
+        GetEnvironmentOverride(ConfigEnvironmentVariable, LegacyConfigEnvironmentVariable) is { Length: > 0 } configured
             ? Path.GetFullPath(configured)
-            : Path.Combine(UserProfileDirectory, "AppData", "Local", "Bachen AI Audio");
+            : Path.Combine(UserProfileDirectory, "AppData", "Local", "BaChen AI Launcher");
 
     public static string DefaultDataDirectory { get; } =
-        Environment.GetEnvironmentVariable("BACHEN_AI_AUDIO_DATA_ROOT") is { Length: > 0 } configured
+        GetEnvironmentOverride(DataEnvironmentVariable, LegacyDataEnvironmentVariable) is { Length: > 0 } configured
             ? Path.GetFullPath(configured)
-            : Path.Combine(UserProfileDirectory, "Documents", "Bachen AI Audio Data");
+            : Path.Combine(UserProfileDirectory, "Documents", "BaChen AI Launcher Data");
 
+    public static string LegacyUserConfigDirectory { get; } =
+        Path.Combine(UserProfileDirectory, "AppData", "Local", "Bachen AI Audio");
+    public static string BrandedLegacySettingsPath { get; } = Path.Combine(BaseDirectory, "BaChen AI Launcher.settings.json");
+    public static string BrandedLegacyModelCatalogPath { get; } = Path.Combine(BaseDirectory, "BaChen AI Launcher.models.json");
     public static string LegacySettingsPath { get; } = Path.Combine(BaseDirectory, "AI Audio Launcher.settings.json");
     public static string LegacyModelCatalogPath { get; } = Path.Combine(BaseDirectory, "AI Audio Launcher.models.json");
     public static bool UsesConfigOverride { get; } =
-        !string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("BACHEN_AI_AUDIO_CONFIG_DIR"));
+        GetEnvironmentOverride(ConfigEnvironmentVariable, LegacyConfigEnvironmentVariable) is not null;
+    public static bool UsesDataOverride { get; } =
+        GetEnvironmentOverride(DataEnvironmentVariable, LegacyDataEnvironmentVariable) is not null;
+
+    private static string? GetEnvironmentOverride(string currentName, string legacyName)
+    {
+        var current = Environment.GetEnvironmentVariable(currentName);
+        return !string.IsNullOrWhiteSpace(current)
+            ? current
+            : Environment.GetEnvironmentVariable(legacyName) is { Length: > 0 } legacy ? legacy : null;
+    }
 }
 
 internal sealed class LauncherSettings
@@ -940,6 +959,7 @@ internal sealed class LauncherForm : Form
         EnsureDataDirectories(_settings);
         SaveSettings(_settings);
         _modelCatalog = LoadModelCatalog();
+        MigrateRenamedCatalogPaths(_modelCatalog);
         SyncBuiltInCatalogEntries();
         SaveModelCatalog(_modelCatalog);
         ArchiveMigratedLegacyConfiguration(_settings);
@@ -1114,24 +1134,38 @@ internal sealed class LauncherForm : Form
         {
             return;
         }
-        if (!File.Exists(SettingsPath) && File.Exists(LauncherPaths.LegacySettingsPath))
+        CopyFirstExistingFile(SettingsPath,
+            Path.Combine(LauncherPaths.LegacyUserConfigDirectory, "launcher.settings.json"),
+            LauncherPaths.BrandedLegacySettingsPath,
+            LauncherPaths.LegacySettingsPath);
+        CopyFirstExistingFile(ModelCatalogPath,
+            Path.Combine(LauncherPaths.LegacyUserConfigDirectory, "models.json"),
+            LauncherPaths.BrandedLegacyModelCatalogPath,
+            LauncherPaths.LegacyModelCatalogPath);
+    }
+
+    private static void CopyFirstExistingFile(string destinationPath, params string[] candidates)
+    {
+        if (File.Exists(destinationPath))
         {
-            File.Copy(LauncherPaths.LegacySettingsPath, SettingsPath, overwrite: false);
+            return;
         }
-        if (!File.Exists(ModelCatalogPath) && File.Exists(LauncherPaths.LegacyModelCatalogPath))
+        var sourcePath = candidates.FirstOrDefault(File.Exists);
+        if (sourcePath is not null)
         {
-            File.Copy(LauncherPaths.LegacyModelCatalogPath, ModelCatalogPath, overwrite: false);
+            File.Copy(sourcePath, destinationPath, overwrite: false);
+            WriteMigrationLog($"Configuration migrated from {sourcePath} to {destinationPath}");
         }
     }
 
     private static LauncherSettings CreateFirstRunSettings()
     {
         var dataRoot = LauncherPaths.DefaultDataDirectory;
-        if (string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("BACHEN_AI_AUDIO_DATA_ROOT")))
+        if (!LauncherPaths.UsesDataOverride)
         {
             using var picker = new FolderBrowserDialog
             {
-                Description = "Choose where Bachen AI Audio should store plugins, models, logs, and downloads.",
+                Description = "Choose where BaChen AI Launcher should store plugins, models, logs, and downloads.",
                 InitialDirectory = dataRoot,
                 SelectedPath = dataRoot,
                 ShowNewFolderButton = true,
@@ -1165,6 +1199,10 @@ internal sealed class LauncherForm : Form
     private static void NormalizeSettings(LauncherSettings settings)
     {
         settings.SchemaVersion = 2;
+        settings.DataRoot = MigrateRenamedPath(settings.DataRoot);
+        settings.WooshRoot = MigrateRenamedPath(settings.WooshRoot);
+        settings.StableRoot = MigrateRenamedPath(settings.StableRoot);
+        settings.IndexTtsRoot = MigrateRenamedPath(settings.IndexTtsRoot);
         var shouldInferRoot = string.IsNullOrWhiteSpace(settings.DataRoot)
             || Path.GetFullPath(settings.DataRoot).Equals(Path.GetFullPath(LauncherPaths.DefaultDataDirectory), StringComparison.OrdinalIgnoreCase);
         var inferredRoot = shouldInferRoot ? InferExistingDataRoot(settings) : null;
@@ -1181,6 +1219,33 @@ internal sealed class LauncherForm : Form
         settings.WooshRoot = string.IsNullOrWhiteSpace(settings.WooshRoot) ? Path.Combine(plugins, "Woosh") : Path.GetFullPath(settings.WooshRoot);
         settings.StableRoot = string.IsNullOrWhiteSpace(settings.StableRoot) ? Path.Combine(plugins, "Stable Audio 3") : Path.GetFullPath(settings.StableRoot);
         settings.IndexTtsRoot = string.IsNullOrWhiteSpace(settings.IndexTtsRoot) ? Path.Combine(plugins, "IndexTTS") : Path.GetFullPath(settings.IndexTtsRoot);
+    }
+
+    private static string MigrateRenamedPath(string? path)
+    {
+        if (string.IsNullOrWhiteSpace(path))
+        {
+            return string.Empty;
+        }
+        var fullPath = Path.GetFullPath(path);
+        if (File.Exists(fullPath) || Directory.Exists(fullPath))
+        {
+            return fullPath;
+        }
+        var migrated = fullPath.Replace("Bachen AI Audio", "BaChen AI Launcher", StringComparison.OrdinalIgnoreCase);
+        return File.Exists(migrated) || Directory.Exists(migrated) ? migrated : fullPath;
+    }
+
+    private static void MigrateRenamedCatalogPaths(LauncherModelCatalog catalog)
+    {
+        foreach (var model in catalog.Models)
+        {
+            model.RootDirectory = MigrateRenamedPath(model.RootDirectory);
+            if (!string.IsNullOrWhiteSpace(model.Executable) && Path.IsPathRooted(model.Executable))
+            {
+                model.Executable = MigrateRenamedPath(model.Executable);
+            }
+        }
     }
 
     private static string? InferExistingDataRoot(LauncherSettings settings)
@@ -1356,7 +1421,7 @@ internal sealed class LauncherForm : Form
     private static HttpClient CreateGitHubClient()
     {
         var client = new HttpClient { Timeout = TimeSpan.FromMinutes(5) };
-        client.DefaultRequestHeaders.UserAgent.ParseAdd($"AI-Audio-Launcher/{LauncherVersion}");
+        client.DefaultRequestHeaders.UserAgent.ParseAdd($"BaChen-AI-Launcher/{LauncherVersion}");
         client.DefaultRequestHeaders.Accept.ParseAdd("application/vnd.github+json");
         return client;
     }
@@ -1572,6 +1637,9 @@ internal sealed class LauncherForm : Form
     }
 
     private static string UpdateStatePath(GitHubUpdateSource source)
+        => Path.Combine(source.DeploymentRoot, ".bachen-ai-launcher-update.json");
+
+    private static string LegacyUpdateStatePath(GitHubUpdateSource source)
         => Path.Combine(source.DeploymentRoot, ".ai-audio-launcher-update.json");
 
     private static SourceUpdateState? LoadUpdateState(GitHubUpdateSource source)
@@ -1579,6 +1647,10 @@ internal sealed class LauncherForm : Form
         try
         {
             var path = UpdateStatePath(source);
+            if (!File.Exists(path))
+            {
+                path = LegacyUpdateStatePath(source);
+            }
             return File.Exists(path) ? JsonSerializer.Deserialize<SourceUpdateState>(File.ReadAllText(path)) : null;
         }
         catch
@@ -1676,7 +1748,7 @@ internal sealed class LauncherForm : Form
     private static async Task<string> ApplySourceUpdateAsync(SourceUpdateCheck check)
     {
         var source = check.Source;
-        var tempRoot = Path.Combine(Path.GetTempPath(), "ai-audio-update-" + Guid.NewGuid().ToString("N"));
+        var tempRoot = Path.Combine(Path.GetTempPath(), "bachen-ai-update-" + Guid.NewGuid().ToString("N"));
         var archivePath = Path.Combine(tempRoot, "source.zip");
         var extractPath = Path.Combine(tempRoot, "extract");
         var backupStaging = Path.Combine(tempRoot, "backup");
@@ -1746,7 +1818,8 @@ internal sealed class LauncherForm : Form
         {
             return true;
         }
-        if (normalized.Equals(".ai-audio-launcher-update.json", StringComparison.OrdinalIgnoreCase))
+        if (normalized.Equals(".bachen-ai-launcher-update.json", StringComparison.OrdinalIgnoreCase) ||
+            normalized.Equals(".ai-audio-launcher-update.json", StringComparison.OrdinalIgnoreCase))
         {
             return true;
         }
@@ -2152,7 +2225,9 @@ internal sealed class LauncherForm : Form
         var name = AddTextRow(table, 0, L("模型名称 *", "Model name *"), string.Empty);
         var description = AddTextRow(table, 1, L("说明", "Description"), string.Empty);
         var category = new ComboBox { Dock = DockStyle.Fill, DropDownStyle = ComboBoxStyle.DropDown, Margin = new Padding(6) };
-        category.Items.AddRange(["Experimental", "Sound design", "Audio generation", "Music", "TTS", "Voice"]);
+        category.Items.AddRange([
+            "Experimental", "Image generation", "Video generation", "LLM / Chat", "Vision", "Coding",
+            "3D generation", "Sound design", "Audio generation", "Music", "TTS", "Voice", "Utilities", "Other"]);
         category.Text = "Experimental";
         table.Controls.Add(new Label { Text = L("分类", "Category"), Dock = DockStyle.Fill, TextAlign = ContentAlignment.MiddleLeft }, 0, 2);
         table.Controls.Add(category, 1, 2);
@@ -2272,7 +2347,7 @@ internal sealed class LauncherForm : Form
 
     private void InitializeUi()
     {
-        Text = "Bachen AI Audio";
+        Text = "BaChen AI Launcher";
         StartPosition = FormStartPosition.CenterScreen;
         MinimumSize = new Size(1180, 800);
         Size = new Size(1440, 900);
@@ -2286,7 +2361,7 @@ internal sealed class LauncherForm : Form
             Height = 82,
             BackColor = Theme.DeepTeal
         };
-        header.Controls.Add(CreateText("BACHEN AI AUDIO", new Rectangle(28, 12, 290, 31), 16F, Color.White, FontStyle.Bold));
+        header.Controls.Add(CreateText("BACHEN AI LAUNCHER", new Rectangle(28, 12, 330, 31), 16F, Color.White, FontStyle.Bold));
         header.Controls.Add(CreateText(L($"本地 AI 插件控制台  ·  v{LauncherVersion}", $"Local AI plugin console  ·  v{LauncherVersion}"), new Rectangle(30, 43, 300, 22), 8.5F, Color.FromArgb(176, 222, 213), FontStyle.Regular));
 
         _phaseLabel.Bounds = new Rectangle(330, 22, 330, 42);
@@ -2827,7 +2902,7 @@ internal sealed class LauncherForm : Form
 
     private void InitializeLegacyUi()
     {
-        Text = L("AI 音频启动器", "AI Audio Launcher");
+        Text = "BaChen AI Launcher";
         StartPosition = FormStartPosition.CenterScreen;
         MinimumSize = new Size(1024, 640);
         Size = new Size(1440, 960);
@@ -2862,7 +2937,7 @@ internal sealed class LauncherForm : Form
             ShadowColor = Color.FromArgb(48, 0, 44, 42),
             ShadowOffset = 7
         };
-        header.Controls.Add(CreateText("LOCAL AI AUDIO LAB", new Rectangle(34, 10, 620, 42), 18F, Color.White, FontStyle.Bold));
+        header.Controls.Add(CreateText("BACHEN AI LAUNCHER", new Rectangle(34, 10, 620, 42), 18F, Color.White, FontStyle.Bold));
         header.Controls.Add(CreateText("Woosh  ·  Stable Audio 3  ·  IndexTTS2", new Rectangle(36, 53, 600, 24), 9.5F, Color.FromArgb(196, 225, 220), FontStyle.Regular));
         var livePill = new RoundedPanel
         {
@@ -2945,9 +3020,9 @@ internal sealed class LauncherForm : Form
             BackColor = Color.Transparent,
             WrapContents = true
         };
-        models.Controls.Add(CreateAudioServiceCard("01  /  SOUND DESIGN", "Woosh-DFlow", L("从文字提示生成短音效与环境声。", "Generate short effects and ambient sound from text prompts."), Capability(_woosh, "TEXT TO SFX"), L("启动 Woosh", "Launch Woosh"), Theme.MidTeal, () => _ = StartServiceAsync(_woosh)));
-        models.Controls.Add(CreateAudioServiceCard("02  /  AUDIO GENERATION", "Stable Audio 3", L("先选择音效、音乐或 medium 模型，再启动服务。", "Choose an SFX, music, or medium model before starting."), Capability(_smallSfx, "3 LOCAL MODELS"), L("选择模型", "Choose model"), Color.FromArgb(29, 117, 105), ShowStableModelSelector));
-        models.Controls.Add(CreateAudioServiceCard("03  /  CHARACTER VOICE", "IndexTTS2", L("以授权参考音频生成角色语音与情绪化对白。", "Create character voices and emotional dialogue from authorized references."), Capability(_indexTts, "VOICE & EMOTION"), L("启动 IndexTTS", "Launch IndexTTS"), Color.FromArgb(54, 87, 139), () => _ = StartServiceAsync(_indexTts)));
+        models.Controls.Add(CreateServiceCard("01  /  SOUND DESIGN", "Woosh-DFlow", L("从文字提示生成短音效与环境声。", "Generate short effects and ambient sound from text prompts."), Capability(_woosh, "TEXT TO SFX"), L("启动 Woosh", "Launch Woosh"), Theme.MidTeal, () => _ = StartServiceAsync(_woosh)));
+        models.Controls.Add(CreateServiceCard("02  /  AUDIO GENERATION", "Stable Audio 3", L("先选择音效、音乐或 medium 模型，再启动服务。", "Choose an SFX, music, or medium model before starting."), Capability(_smallSfx, "3 LOCAL MODELS"), L("选择模型", "Choose model"), Color.FromArgb(29, 117, 105), ShowStableModelSelector));
+        models.Controls.Add(CreateServiceCard("03  /  CHARACTER VOICE", "IndexTTS2", L("以授权参考音频生成角色语音与情绪化对白。", "Create character voices and emotional dialogue from authorized references."), Capability(_indexTts, "VOICE & EMOTION"), L("启动 IndexTTS", "Launch IndexTTS"), Color.FromArgb(54, 87, 139), () => _ = StartServiceAsync(_indexTts)));
         var modelNumber = 4;
         foreach (var definition in CustomModelDefinitions())
         {
@@ -2955,7 +3030,7 @@ internal sealed class LauncherForm : Form
             var capability = definition.RecommendedVramMiB > 0
                 ? $"{definition.RecommendedVramMiB / 1024D:0.#} GB VRAM"
                 : "CUSTOM MODEL";
-            models.Controls.Add(CreateAudioServiceCard(
+            models.Controls.Add(CreateServiceCard(
                 $"{modelNumber:00}  /  {definition.Category.ToUpperInvariant()}",
                 definition.DisplayName,
                 string.IsNullOrWhiteSpace(definition.Description) ? L("由模型目录配置驱动的本地服务。", "Local service managed by the model catalog.") : definition.Description,
@@ -3142,7 +3217,7 @@ internal sealed class LauncherForm : Form
         ApplyResponsiveLayout();
     }
 
-    private AnimatedServiceCard CreateAudioServiceCard(string index, string title, string description, string capability, string actionText, Color accent, Action action)
+    private AnimatedServiceCard CreateServiceCard(string index, string title, string description, string capability, string actionText, Color accent, Action action)
     {
         return new AnimatedServiceCard
         {
@@ -3172,6 +3247,10 @@ internal sealed class LauncherForm : Form
             "TTS" or "VOICE" or "CHARACTER VOICE" => Color.FromArgb(54, 87, 139),
             "MUSIC" or "AUDIO GENERATION" => Color.FromArgb(29, 117, 105),
             "SOUND" or "SOUND DESIGN" => Theme.MidTeal,
+            "IMAGE GENERATION" or "VISION" => Color.FromArgb(183, 83, 70),
+            "VIDEO GENERATION" or "3D GENERATION" => Color.FromArgb(170, 105, 42),
+            "LLM / CHAT" or "CODING" => Color.FromArgb(49, 104, 151),
+            "UTILITIES" => Color.FromArgb(91, 105, 111),
             _ => Color.FromArgb(132, 79, 145)
         };
     }

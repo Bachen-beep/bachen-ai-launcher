@@ -3,7 +3,7 @@ param()
 
 $ErrorActionPreference = "Stop"
 $projectRoot = Split-Path -Parent $PSScriptRoot
-$projectPath = Join-Path $projectRoot "AI Audio Launcher.csproj"
+$projectPath = Join-Path $projectRoot "BaChen AI Launcher.csproj"
 $outputPath = Join-Path $projectRoot "artifacts\release"
 
 if (Test-Path -LiteralPath $outputPath) {
@@ -22,7 +22,7 @@ if ($LASTEXITCODE -ne 0) {
 }
 
 $publishedFiles = @(Get-ChildItem -LiteralPath $outputPath -File)
-if ($publishedFiles.Count -ne 1 -or $publishedFiles[0].Name -ne "AI Audio Launcher.exe") {
+if ($publishedFiles.Count -ne 1 -or $publishedFiles[0].Name -ne "BaChen AI Launcher.exe") {
     $names = $publishedFiles.Name -join ", "
     throw "Unexpected release contents: $names"
 }
