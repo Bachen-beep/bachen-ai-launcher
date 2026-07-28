@@ -114,14 +114,15 @@ internal static class LauncherSelfTests
             var previewManifestUri = await updateService.ResolveManifestUriAsync(LauncherUpdateChannel.Preview);
             Assert(previewManifestUri.AbsoluteUri.Contains("stage2-preview/launcher-update.json", StringComparison.Ordinal), "Preview update channel resolution", lines);
 
-            using (var noStableClient = new HttpClient(new StatusCodeHandler(System.Net.HttpStatusCode.NotFound)))
+            var fallbackHandler = new StableMissingPreviewHandler();
+            using (var noStableClient = new HttpClient(fallbackHandler))
             {
                 var noStableService = new LauncherSelfUpdateService(noStableClient);
                 var unavailable = await AssertThrowsAsync<LauncherUpdateUnavailableException>(
                     () => noStableService.CheckAsync(LauncherUpdateChannel.Stable),
-                    "Missing stable release classification",
+                    "Stable channel preview fallback",
                     lines);
-                Assert(unavailable.Channel == LauncherUpdateChannel.Stable, "Missing stable release channel", lines);
+                Assert(unavailable.Channel == LauncherUpdateChannel.Preview && fallbackHandler.RequestCount == 2, "Missing stable release falls back to preview API", lines);
             }
             using (var noPreviewClient = new HttpClient(new StaticJsonHandler("[]")))
             {
@@ -285,6 +286,7 @@ internal static class LauncherSelfTests
             Assert(new LauncherModelCatalog().Models.Count == 0, "Clean model catalog contains no built-in plugins", lines);
             var parsedGpus = SystemResourceProbe.ParseGpuOutput("0, NVIDIA GeForce RTX 4060, 512, 8188\r\n1, NVIDIA GeForce RTX 4090, 1024, 24564\r\n");
             Assert(parsedGpus.Count == 2 && parsedGpus.OrderByDescending(gpu => gpu.TotalMiB).First().Name == "NVIDIA GeForce RTX 4090", "Actual multi-GPU model parsing and primary selection", lines);
+            Assert(SystemResourceProbe.FormatGpuUsageGiB(1024, 8188) == "1.00 / 8.00 GiB", "GPU MiB to GiB display formatting", lines);
 
             var gitHubSourceRoot = Path.Combine(testRoot, "github-source");
             Directory.CreateDirectory(gitHubSourceRoot);
@@ -420,7 +422,7 @@ internal static class LauncherSelfTests
             LauncherConfigurationStore.SaveAtomic(settingsPath, expectedSettings);
             var loadedSettings = LauncherConfigurationStore.LoadOrCreate(settingsPath, () => new LauncherSettings());
             Assert(loadedSettings.WooshPort == 18001 && File.Exists(settingsPath), "Atomic configuration save and load", lines);
-            Assert(loadedSettings.LauncherUpdateChannel == LauncherUpdateChannel.Stable, "Stable update channel default", lines);
+            Assert(loadedSettings.LauncherUpdateChannel == LauncherUpdateChannel.Preview, "Preview update channel default", lines);
             loadedSettings.LauncherUpdateChannel = LauncherUpdateChannel.Preview;
             LauncherConfigurationStore.SaveAtomic(settingsPath, loadedSettings);
             var previewSettings = LauncherConfigurationStore.LoadOrCreate(settingsPath, () => new LauncherSettings());
@@ -605,6 +607,22 @@ internal static class LauncherSelfTests
     {
         protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
             => Task.FromResult(new HttpResponseMessage(statusCode));
+    }
+
+    private sealed class StableMissingPreviewHandler : HttpMessageHandler
+    {
+        public int RequestCount { get; private set; }
+
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            RequestCount++;
+            return Task.FromResult(request.RequestUri == LauncherSelfUpdateService.DefaultManifestUri
+                ? new HttpResponseMessage(System.Net.HttpStatusCode.NotFound)
+                : new HttpResponseMessage(System.Net.HttpStatusCode.OK)
+                {
+                    Content = new StringContent("[]", Encoding.UTF8, "application/json")
+                });
+        }
     }
 
     private sealed class FailureHandler(Exception exception) : HttpMessageHandler

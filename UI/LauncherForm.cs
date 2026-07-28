@@ -812,8 +812,10 @@ internal sealed class LauncherForm : Form
     private readonly Dictionary<string, PluginListItem> _pluginItems = new(StringComparer.OrdinalIgnoreCase);
     private readonly System.Windows.Forms.Timer _gpuRefreshTimer = new() { Interval = 5000 };
     private readonly System.Windows.Forms.Timer _logAnimationTimer = new() { Interval = 15 };
+    private readonly ToolTip _toolTip = new();
     private RoundedButton _openButton = new();
     private RoundedButton? _detailPrimaryButton;
+    private RoundedButton? _detailUninstallButton;
     private RoundedButton? _logToggleButton;
     private SafeTextLabel? _gpuSummaryLabel;
     private SafeTextLabel? _gpuNameLabel;
@@ -1819,7 +1821,7 @@ internal sealed class LauncherForm : Form
             Text = L("启动器设置", "Launcher settings"),
             StartPosition = FormStartPosition.CenterParent,
             FormBorderStyle = FormBorderStyle.FixedDialog,
-            ClientSize = new Size(940, 620),
+            ClientSize = new Size(940, 410),
             MaximizeBox = false,
             MinimizeBox = false,
             ShowInTaskbar = false,
@@ -1829,54 +1831,25 @@ internal sealed class LauncherForm : Form
         var table = new TableLayoutPanel
         {
             Dock = DockStyle.Top,
-            Height = 430,
+            Height = 90,
             Padding = new Padding(24, 24, 24, 8),
             ColumnCount = 3,
-            RowCount = 7,
+            RowCount = 1,
             BackColor = Theme.Card
         };
         table.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 175));
         table.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
         table.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 100));
-
-        for (var row = 0; row < 7; row++)
-        {
-            table.RowStyles.Add(new RowStyle(SizeType.Absolute, 56));
-        }
+        table.RowStyles.Add(new RowStyle(SizeType.Absolute, 56));
 
         var dataRootBox = AddPathSettingRow(table, 0, L("数据根目录", "Data directory"), _settings.DataRoot, dialog);
-        var wooshBox = AddPathSettingRow(table, 1, "Woosh", _settings.WooshRoot, dialog);
-        var stableBox = AddPathSettingRow(table, 2, "Stable Audio 3", _settings.StableRoot, dialog);
-        var indexBox = AddPathSettingRow(table, 3, "IndexTTS2", _settings.IndexTtsRoot, dialog);
-        var wooshPort = AddPortSettingRow(table, 4, L("Woosh 端口", "Woosh port"), _settings.WooshPort);
-        var stablePort = AddPortSettingRow(table, 5, L("Stable 端口", "Stable port"), _settings.StablePort);
-        var indexPort = AddPortSettingRow(table, 6, L("IndexTTS2 端口", "IndexTTS2 port"), _settings.IndexTtsPort);
-
-        var previousDataRoot = Path.GetFullPath(_settings.DataRoot);
-        var followsDataRoot = new[]
-        {
-            (_settings.WooshRoot, "Woosh"),
-            (_settings.StableRoot, "Stable Audio 3"),
-            (_settings.IndexTtsRoot, "IndexTTS")
-        }.All(item => Path.GetFullPath(item.Item1).Equals(Path.Combine(previousDataRoot, "plugins", item.Item2), StringComparison.OrdinalIgnoreCase));
-        dataRootBox.TextChanged += (_, _) =>
-        {
-            if (!followsDataRoot || string.IsNullOrWhiteSpace(dataRootBox.Text))
-            {
-                return;
-            }
-            var plugins = Path.Combine(dataRootBox.Text.Trim(), "plugins");
-            wooshBox.Text = Path.Combine(plugins, "Woosh");
-            stableBox.Text = Path.Combine(plugins, "Stable Audio 3");
-            indexBox.Text = Path.Combine(plugins, "IndexTTS");
-        };
         dialog.Controls.Add(table);
 
         var automaticUpdates = new CheckBox
         {
             Text = L("启动时自动检查启动器更新", "Automatically check launcher updates at startup"),
             Checked = _settings.AutomaticallyCheckLauncherUpdates,
-            Location = new Point(28, 442),
+            Location = new Point(28, 128),
             Size = new Size(520, 32),
             ForeColor = Theme.Ink,
             BackColor = Theme.Card
@@ -1886,7 +1859,7 @@ internal sealed class LauncherForm : Form
         var updateChannelLabel = new Label
         {
             Text = L("启动器更新通道", "Launcher update channel"),
-            Location = new Point(560, 442),
+            Location = new Point(560, 128),
             Size = new Size(180, 30),
             TextAlign = ContentAlignment.MiddleLeft,
             ForeColor = Theme.Ink,
@@ -1895,7 +1868,7 @@ internal sealed class LauncherForm : Form
         var updateChannel = new ComboBox
         {
             DropDownStyle = ComboBoxStyle.DropDownList,
-            Location = new Point(742, 442),
+            Location = new Point(742, 128),
             Size = new Size(170, 30)
         };
         updateChannel.Items.AddRange([L("稳定版", "Stable"), L("预览版", "Preview")]);
@@ -1906,14 +1879,14 @@ internal sealed class LauncherForm : Form
         var note = new Label
         {
             AutoSize = false,
-            Text = L("保存只会更新路径，不会移动现有插件或模型文件。", "Saving updates paths only; existing plugins and model files are not moved."),
+            Text = L("插件端口和启动命令在各插件的添加配置中管理。更改数据目录不会移动现有插件文件。", "Plugin ports and launch commands are managed per plugin. Changing the data directory does not move existing plugin files."),
             ForeColor = Theme.Muted,
-            Location = new Point(28, 480),
-            Size = new Size(750, 48)
+            Location = new Point(28, 184),
+            Size = new Size(860, 52)
         };
         dialog.Controls.Add(note);
-        var cancel = new Button { Text = L("取消", "Cancel"), DialogResult = DialogResult.Cancel, Size = new Size(110, 38), Location = new Point(682, 558) };
-        var save = new Button { Text = L("保存", "Save"), DialogResult = DialogResult.OK, Size = new Size(110, 38), Location = new Point(806, 558) };
+        var cancel = new Button { Text = L("取消", "Cancel"), DialogResult = DialogResult.Cancel, Size = new Size(110, 38), Location = new Point(682, 342) };
+        var save = new Button { Text = L("保存", "Save"), DialogResult = DialogResult.OK, Size = new Size(110, 38), Location = new Point(806, 342) };
         dialog.Controls.Add(cancel);
         dialog.Controls.Add(save);
         dialog.AcceptButton = save;
@@ -1928,12 +1901,12 @@ internal sealed class LauncherForm : Form
         {
             SchemaVersion = 3,
             DataRoot = dataRootBox.Text.Trim(),
-            WooshRoot = wooshBox.Text.Trim(),
-            StableRoot = stableBox.Text.Trim(),
-            IndexTtsRoot = indexBox.Text.Trim(),
-            WooshPort = (int)wooshPort.Value,
-            StablePort = (int)stablePort.Value,
-            IndexTtsPort = (int)indexPort.Value
+            WooshRoot = _settings.WooshRoot,
+            StableRoot = _settings.StableRoot,
+            IndexTtsRoot = _settings.IndexTtsRoot,
+            WooshPort = _settings.WooshPort,
+            StablePort = _settings.StablePort,
+            IndexTtsPort = _settings.IndexTtsPort
             ,AutomaticallyCheckLauncherUpdates = automaticUpdates.Checked
             ,LauncherUpdateChannel = updateChannel.SelectedIndex == 1 ? LauncherUpdateChannel.Preview : LauncherUpdateChannel.Stable
             ,SkippedLauncherVersion = _settings.SkippedLauncherVersion
@@ -1947,24 +1920,6 @@ internal sealed class LauncherForm : Form
             updated.SkippedLauncherVersion = string.Empty;
             updated.LauncherUpdateDeferredUntil = null;
         }
-        var builtInPorts = new[] { updated.WooshPort, updated.StablePort, updated.IndexTtsPort };
-        if (builtInPorts.Distinct().Count() != builtInPorts.Length)
-        {
-            MessageBox.Show(
-                L("Woosh、Stable Audio 3 和 IndexTTS 必须使用三个不同端口。", "Woosh, Stable Audio 3, and IndexTTS must use three different ports."),
-                L("端口冲突", "Port conflict"),
-                MessageBoxButtons.OK,
-                MessageBoxIcon.Warning);
-            return;
-        }
-        var invalidRoots = new[] { updated.WooshRoot, updated.StableRoot, updated.IndexTtsRoot }.Where(path => !Directory.Exists(path)).ToArray();
-        if (invalidRoots.Length > 0 && MessageBox.Show(
-                L("以下目录目前不存在：\n", "These directories do not currently exist:\n") + string.Join(Environment.NewLine, invalidRoots) + Environment.NewLine + Environment.NewLine + L("仍然保存吗？", "Save anyway?"),
-                L("目录检查", "Directory check"), MessageBoxButtons.YesNo, MessageBoxIcon.Warning) != DialogResult.Yes)
-        {
-            return;
-        }
-
         NormalizeSettings(updated);
         EnsureDataDirectories(updated);
         _settings = updated;
@@ -2862,6 +2817,15 @@ internal sealed class LauncherForm : Form
                 MessageBox.Show(L("启动程序必须是下载目录内的安全相对路径。", "Executable must be a safe path relative to the downloaded repository."), L("启动路径无效", "Invalid launch path"), MessageBoxButtons.OK, MessageBoxIcon.Warning);
                 return;
             }
+            if (executable.Text.Trim().EndsWith("python.exe", StringComparison.OrdinalIgnoreCase) && string.IsNullOrWhiteSpace(arguments.Text))
+            {
+                MessageBox.Show(
+                    L("Python 插件必须填写启动参数，例如 app.py --server-port {port}。仅启动 python.exe 会立即退出，不能启动模型服务。", "Python plugins require launch arguments, for example app.py --server-port {port}. Starting python.exe alone exits immediately and cannot start a model service."),
+                    L("缺少启动入口", "Missing launch entry point"),
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Warning);
+                return;
+            }
             var configuredPorts = _modelCatalog.Models.Select(definition => definition.Port);
             if (configuredPorts.Contains((int)port.Value))
             {
@@ -3314,17 +3278,22 @@ internal sealed class LauncherForm : Form
         if (_medium is not null) AddStableModeButton(_stableModePanel, "medium", _medium);
         detailPanel.Controls.Add(_stableModePanel);
 
-        _detailPrimaryButton = CreateActionButton(L("启动插件", "Launch plugin"), Theme.DeepTeal, 210);
+        _detailPrimaryButton = CreateActionButton(L("启动插件", "Launch plugin"), Theme.DeepTeal, 170);
         _detailPrimaryButton.Location = new Point(30, 466);
         _detailPrimaryButton.Height = 42;
         _detailPrimaryButton.Click += (_, _) => HandlePrimaryPluginAction();
         _openButton = _detailPrimaryButton;
-        var stopButton = CreateActionButton(L("停止当前 AI", "Stop active AI"), Theme.Coral, 170);
-        stopButton.Location = new Point(252, 466);
+        var stopButton = CreateActionButton(L("停止当前 AI", "Stop active AI"), Theme.Coral, 130);
+        stopButton.Location = new Point(210, 466);
         stopButton.Height = 42;
         stopButton.Click += (_, _) => StopKnownServices();
+        _detailUninstallButton = CreateActionButton(L("卸载插件", "Uninstall"), Color.FromArgb(96, 99, 108), 140);
+        _detailUninstallButton.Location = new Point(350, 466);
+        _detailUninstallButton.Height = 42;
+        _detailUninstallButton.Click += (_, _) => UninstallSelectedPlugin();
         detailPanel.Controls.Add(_detailPrimaryButton);
         detailPanel.Controls.Add(stopButton);
+        detailPanel.Controls.Add(_detailUninstallButton);
         detailPanel.Controls.Add(CreateParagraph(L("模型启动后，主按钮会自动切换为打开 WebUI。", "The primary action changes to Open WebUI when the service is ready."), new Rectangle(30, 520, 500, 45), 8.5F, Theme.Muted, FontStyle.Regular));
         detailPanel.SizeChanged += (_, _) =>
         {
@@ -3554,6 +3523,7 @@ internal sealed class LauncherForm : Form
             if (_detailTrustLabel is not null) _detailTrustLabel.Text = string.Empty;
             if (_stableModePanel is not null) _stableModePanel.Visible = false;
             if (_detailPrimaryButton is not null) _detailPrimaryButton.Enabled = false;
+            if (_detailUninstallButton is not null) _detailUninstallButton.Enabled = false;
             return;
         }
         foreach (var entry in _pluginEntries)
@@ -3579,7 +3549,7 @@ internal sealed class LauncherForm : Form
         }
         if (_detailRootLabel is not null) _detailRootLabel.Text = L("目录：", "Directory: ") + selected.Profile.WorkingDirectory;
         if (_detailPortLabel is not null) _detailPortLabel.Text = $"PORT  {selected.Profile.Port}";
-        if (_detailMemoryLabel is not null) _detailMemoryLabel.Text = selected.RecommendedVramMiB > 0 ? $"VRAM  {selected.RecommendedVramMiB / 1024D:0.#} GB" : "VRAM  --";
+        if (_detailMemoryLabel is not null) _detailMemoryLabel.Text = selected.RecommendedVramMiB > 0 ? $"VRAM  {selected.RecommendedVramMiB / 1024D:0.#} GiB" : "VRAM  --";
         var definition = _modelCatalog.Models.FirstOrDefault(model => model.Id.Equals(selected.Id, StringComparison.OrdinalIgnoreCase));
         if (_detailVersionLabel is not null)
         {
@@ -3618,6 +3588,11 @@ internal sealed class LauncherForm : Form
             _detailPrimaryButton.Enabled = selectedState is not (ServiceRuntimeState.Checking or ServiceRuntimeState.Starting or ServiceRuntimeState.Stopping or ServiceRuntimeState.Updating);
             _detailPrimaryButton.Invalidate();
         }
+        if (_detailUninstallButton is not null)
+        {
+            _detailUninstallButton.Enabled = selectedState is not (ServiceRuntimeState.Checking or ServiceRuntimeState.Starting or ServiceRuntimeState.Stopping or ServiceRuntimeState.Updating);
+            _detailUninstallButton.Invalidate();
+        }
     }
 
     private string RuntimeStateText(ServiceRuntimeState state) => state switch
@@ -3655,7 +3630,10 @@ internal sealed class LauncherForm : Form
             return;
         }
         _gpuNameLabel.Text = gpu.Name;
-        _gpuSummaryLabel.Text = $"{gpu.UsedMiB:N0} / {gpu.TotalMiB:N0} MiB";
+        _gpuSummaryLabel.Text = SystemResourceProbe.FormatGpuUsageGiB(gpu.UsedMiB, gpu.TotalMiB);
+        _toolTip.SetToolTip(_gpuSummaryLabel, L(
+            $"NVIDIA 专用显存（nvidia-smi 原始值）：{gpu.UsedMiB:N0} / {gpu.TotalMiB:N0} MiB",
+            $"Dedicated NVIDIA VRAM (raw nvidia-smi values): {gpu.UsedMiB:N0} / {gpu.TotalMiB:N0} MiB"));
         _gpuMeter.SetValue(gpu.UsedMiB, gpu.TotalMiB);
     }
 
@@ -4228,12 +4206,19 @@ internal sealed class LauncherForm : Form
             {
                 if (_activeProcess?.Id == process.Id)
                 {
+                    var exitCode = process.ExitCode;
+                    var wasStopping = _runtimeStates.TryGetValue(ServiceKey(profile), out var priorState) && priorState == ServiceRuntimeState.Stopping;
                     _activeProcess = null;
                     _activeService = null;
                     _openButton.Enabled = false;
-                    SetRuntimePhase("服务进程已退出", $"{profile.Name} exited");
-                    AppendLog(L($"服务进程已退出（PID {process.Id}，退出码 {process.ExitCode}）。", $"Service process exited (PID {process.Id}, exit code {process.ExitCode})."), profile, true);
-                    SetServiceRuntimeState(profile, ServiceRuntimeState.Error);
+                    SetRuntimePhase(wasStopping ? "服务已停止" : "服务进程已退出", wasStopping ? $"{profile.Name} stopped" : $"{profile.Name} exited");
+                    AppendLog(L($"服务进程已退出（PID {process.Id}，退出码 {exitCode}）。", $"Service process exited (PID {process.Id}, exit code {exitCode})."), profile, !wasStopping);
+                    SetServiceRuntimeState(profile, wasStopping ? ServiceRuntimeState.Ready : ServiceRuntimeState.Error);
+                    if (!wasStopping)
+                    {
+                        var details = BuildLaunchFailureDetails(profile, exitCode);
+                        ShowActionableError(L("插件启动失败", "Plugin launch failed"), details, profile);
+                    }
                 }
                 RefreshStatus();
             });
@@ -4311,6 +4296,8 @@ internal sealed class LauncherForm : Form
             Size = new Size(704, 128),
             ScrollBars = ScrollBars.Vertical
         };
+        var copy = new Button { Text = L("复制失败详情", "Copy details"), Location = new Point(18, 184), Size = new Size(122, 38) };
+        copy.Click += (_, _) => Clipboard.SetText(message);
         var check = new Button { Text = L("环境自检", "Environment check"), Location = new Point(150, 184), Size = new Size(132, 38) };
         check.Click += (_, _) => ShowEnvironmentReport();
         var folder = new Button { Text = L("打开模型目录", "Open model folder"), Location = new Point(292, 184), Size = new Size(132, 38) };
@@ -4319,12 +4306,33 @@ internal sealed class LauncherForm : Form
         logs.Click += (_, _) => OpenProfileLogFolder(profile);
         var close = new Button { Text = L("关闭", "Close"), DialogResult = DialogResult.OK, Location = new Point(566, 184), Size = new Size(142, 38) };
         dialog.Controls.Add(content);
+        dialog.Controls.Add(copy);
         dialog.Controls.Add(check);
         dialog.Controls.Add(folder);
         dialog.Controls.Add(logs);
         dialog.Controls.Add(close);
         dialog.AcceptButton = close;
         dialog.ShowDialog(this);
+    }
+
+    private string BuildLaunchFailureDetails(ServiceProfile profile, int exitCode)
+    {
+        var recentErrors = _logEntries
+            .Where(entry => entry.ServiceName?.Equals(profile.Name, StringComparison.OrdinalIgnoreCase) == true && entry.IsError)
+            .TakeLast(12)
+            .Select(entry => $"[{entry.Timestamp:HH:mm:ss}] {entry.Message}");
+        return string.Join(Environment.NewLine,
+            [
+                L($"插件 {profile.Name} 启动后立即退出。", $"{profile.Name} exited before its WebUI became ready."),
+                $"Exit code: {exitCode}",
+                $"Executable: {profile.Executable}",
+                $"Arguments: {profile.Arguments}",
+                $"Working directory: {profile.WorkingDirectory}",
+                $"Port: {profile.Port}",
+                "",
+                L("最近错误：", "Recent errors:"),
+                .. recentErrors
+            ]);
     }
 
     private void OpenProfileLogFolder(ServiceProfile profile)
@@ -4430,7 +4438,7 @@ internal sealed class LauncherForm : Form
         parts.Add(known.Count > 0 ? L($"已识别 AI 进程：{string.Join(",", known)}", $"Recognized AI processes: {string.Join(",", known)}") : L("未检测到已识别 AI 进程", "No recognized AI process"));
         if (gpu is not null)
         {
-            parts.Add(L($"GPU {gpu.Value.UsedMiB}/{gpu.Value.TotalMiB} MiB", $"GPU {gpu.Value.UsedMiB}/{gpu.Value.TotalMiB} MiB"));
+            parts.Add("GPU " + SystemResourceProbe.FormatGpuUsageGiB(gpu.Value.UsedMiB, gpu.Value.TotalMiB));
         }
         if (!string.IsNullOrWhiteSpace(_backgroundUpdateStatusChinese) || !string.IsNullOrWhiteSpace(_backgroundUpdateStatusEnglish))
         {

@@ -87,6 +87,9 @@ internal static class ResourceScheduler
 
 internal static class SystemResourceProbe
 {
+    internal static string FormatGpuUsageGiB(int usedMiB, int totalMiB)
+        => $"{usedMiB / 1024D:0.00} / {totalMiB / 1024D:0.00} GiB";
+
     public static SystemResourceSnapshot Capture()
     {
         var gpu = ReadPrimaryGpu();

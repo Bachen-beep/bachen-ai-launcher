@@ -34,7 +34,8 @@ internal sealed class LauncherSelfUpdateService(HttpClient client)
             channel == LauncherUpdateChannel.Stable &&
             ex.StatusCode == System.Net.HttpStatusCode.NotFound)
         {
-            throw new LauncherUpdateUnavailableException(channel, ex);
+            resolvedManifestUri = await ResolveManifestUriAsync(LauncherUpdateChannel.Preview);
+            json = await client.GetStringAsync(resolvedManifestUri);
         }
         var manifest = JsonSerializer.Deserialize<LauncherUpdateManifest>(json, new JsonSerializerOptions { PropertyNameCaseInsensitive = true })
             ?? throw new InvalidDataException("The launcher update manifest is empty.");
