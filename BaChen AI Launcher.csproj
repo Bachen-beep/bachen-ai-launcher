@@ -25,4 +25,7 @@
     <DebugType>None</DebugType>
     <DebugSymbols>false</DebugSymbols>
   </PropertyGroup>
+  <ItemGroup>
+    <EmbeddedResource Include="Security\launcher-update-public.pem" LogicalName="BaChenAiLauncher.UpdatePublicKey" />
+  </ItemGroup>
 </Project>

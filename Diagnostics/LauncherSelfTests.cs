@@ -66,6 +66,24 @@ internal static class LauncherSelfTests
                 Publishers = [new TrustedPublisher { KeyId = "self-test-key", DisplayName = "Self Test Publisher", PublicKeyPem = rsa.ExportSubjectPublicKeyInfoPem() }]
             };
 
+            var launcherUpdate = new LauncherUpdateManifest
+            {
+                Version = "99.0.0",
+                MinimumCompatibleVersion = "0.11.0",
+                DownloadUrl = "https://github.com/Bachen-beep/bachen-ai-launcher/releases/download/v99.0.0/BaChen.AI.Launcher.exe",
+                Sha256 = new string('A', 64),
+                ReleaseNotesUrl = "https://github.com/Bachen-beep/bachen-ai-launcher/releases/tag/v99.0.0",
+                PublishedAt = DateTimeOffset.Parse("2026-07-28T00:00:00Z")
+            };
+            var updatePayload = Encoding.UTF8.GetBytes(LauncherUpdateManifestVerifier.CreateCanonicalPayload(launcherUpdate));
+            launcherUpdate.Signature.Value = Convert.ToBase64String(rsa.SignData(updatePayload, HashAlgorithmName.SHA256, RSASignaturePadding.Pkcs1));
+            launcherUpdate.Signature.KeyId = LauncherUpdateManifestVerifier.KeyId;
+            LauncherUpdateManifestVerifier.Validate(launcherUpdate, rsa.ExportSubjectPublicKeyInfoPem());
+            lines.Add("PASS: Launcher update signature verification");
+            launcherUpdate.Sha256 = new string('B', 64);
+            AssertThrows(() => LauncherUpdateManifestVerifier.Validate(launcherUpdate, rsa.ExportSubjectPublicKeyInfoPem()), "Launcher update tamper detection", lines);
+            launcherUpdate.Sha256 = new string('A', 64);
+
             Assert(PluginManifestSignatureVerifier.Verify(manifest, publishers).IsTrusted, "Signed manifest verification", lines);
             manifest.Description += " tampered";
             Assert(!PluginManifestSignatureVerifier.Verify(manifest, publishers).IsTrusted, "Manifest tamper detection", lines);
@@ -129,6 +147,20 @@ internal static class LauncherSelfTests
             throw new InvalidOperationException($"Self-test assertion failed: {name}");
         }
         lines.Add("PASS: " + name);
+    }
+
+    private static void AssertThrows(Action action, string name, ICollection<string> lines)
+    {
+        try
+        {
+            action();
+        }
+        catch
+        {
+            lines.Add("PASS: " + name);
+            return;
+        }
+        throw new InvalidOperationException($"Self-test assertion failed: {name}");
     }
 
     private static async Task WriteReportAsync(string reportPath, IEnumerable<string> lines)

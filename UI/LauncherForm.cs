@@ -788,6 +788,7 @@ internal sealed class LauncherForm : Form
     private static readonly HttpClient GitHubClient = CreateGitHubClient();
     private readonly PluginPackageService _pluginPackageService = new(GitHubClient);
     private readonly GitHubUpdateService _sourceUpdateService = new(GitHubClient);
+    private readonly LauncherSelfUpdateService _launcherUpdateService = new(GitHubClient);
     private LauncherSettings _settings;
     private LauncherModelCatalog _modelCatalog = new();
     private TrustedPublisherStore _trustedPublishers = new();
@@ -1361,6 +1362,70 @@ internal sealed class LauncherForm : Form
         finally
         {
             _updateBusy = false;
+        }
+    }
+
+    private async Task CheckLauncherUpdateAsync()
+    {
+        if (_updateBusy)
+        {
+            return;
+        }
+        _updateBusy = true;
+        try
+        {
+            SetRuntimePhase("正在检查启动器更新", "Checking launcher updates");
+            AppendLog(L("正在验证启动器更新清单……", "Verifying launcher update manifest..."));
+            var check = await _launcherUpdateService.CheckAsync();
+            if (!check.IsUpdateAvailable)
+            {
+                MessageBox.Show(L($"当前版本 {check.CurrentVersion.ToString(3)} 已是最新版本。", $"Version {check.CurrentVersion.ToString(3)} is up to date."), L("启动器更新", "Launcher update"), MessageBoxButtons.OK, MessageBoxIcon.Information);
+                return;
+            }
+            var confirmation = MessageBox.Show(
+                L($"发现启动器 {check.LatestVersion.ToString(3)}。\n\n更新文件已经过 RSA 签名和 SHA-256 校验，安装前会保留当前 EXE。现在下载并更新吗？", $"Launcher {check.LatestVersion.ToString(3)} is available.\n\nThe update is protected by an RSA signature and SHA-256; the current EXE will be backed up. Download and install now?"),
+                L("发现启动器更新", "Launcher update available"), MessageBoxButtons.YesNo, MessageBoxIcon.Information);
+            if (confirmation != DialogResult.Yes)
+            {
+                return;
+            }
+            SetRuntimePhase("正在下载并校验启动器", "Downloading and verifying launcher");
+            var packagePath = await _launcherUpdateService.DownloadVerifiedAsync(check.Manifest);
+            AppendLog(L($"启动器 {check.LatestVersion.ToString(3)} 校验通过，准备重启。", $"Launcher {check.LatestVersion.ToString(3)} verified; preparing to restart."));
+            LauncherSelfUpdateService.BeginApply(packagePath, check.Manifest);
+            Application.Exit();
+        }
+        catch (Exception ex)
+        {
+            AppendLog(L($"启动器更新失败：{ex.Message}", $"Launcher update failed: {ex.Message}"), null, true);
+            MessageBox.Show(ex.Message, L("启动器更新失败", "Launcher update failed"), MessageBoxButtons.OK, MessageBoxIcon.Error);
+        }
+        finally
+        {
+            _updateBusy = false;
+            SetRuntimePhase("启动器更新检查完成", "Launcher update check complete");
+        }
+    }
+
+    private async Task RollbackLauncherAsync()
+    {
+        if (LauncherSelfUpdateService.GetRollbackPath() is null)
+        {
+            MessageBox.Show(L("没有可恢复的上一版启动器。", "No previous launcher backup is available."), L("恢复启动器", "Restore launcher"), MessageBoxButtons.OK, MessageBoxIcon.Information);
+            return;
+        }
+        if (MessageBox.Show(L("将退出并恢复上一版启动器，当前版本会被保留为新的备份。继续吗？", "The launcher will exit and restore the previous version. The current version becomes the new backup. Continue?"), L("恢复上一版启动器", "Restore previous launcher"), MessageBoxButtons.YesNo, MessageBoxIcon.Warning) != DialogResult.Yes)
+        {
+            return;
+        }
+        try
+        {
+            await LauncherSelfUpdateService.BeginRollbackAsync();
+            Application.Exit();
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show(ex.Message, L("恢复失败", "Restore failed"), MessageBoxButtons.OK, MessageBoxIcon.Error);
         }
     }
 
@@ -1999,6 +2064,9 @@ internal sealed class LauncherForm : Form
     private ContextMenuStrip CreateMaintenanceMenu()
     {
         var menu = new ContextMenuStrip();
+        menu.Items.Add(L("检查启动器更新", "Check launcher update"), null, async (_, _) => await CheckLauncherUpdateAsync());
+        menu.Items.Add(L("恢复上一版启动器", "Restore previous launcher"), null, async (_, _) => await RollbackLauncherAsync());
+        menu.Items.Add(new ToolStripSeparator());
         menu.Items.Add(L("安装签名插件包", "Install signed plugin"), null, async (_, _) => await ShowInstallPluginWizardAsync());
         menu.Items.Add(L("卸载所选插件", "Uninstall selected plugin"), null, (_, _) => UninstallSelectedPlugin());
         menu.Items.Add(L("受信任发布者", "Trusted publishers"), null, (_, _) => ShowTrustedPublishersDialog());
