@@ -2893,6 +2893,13 @@ internal sealed class LauncherForm : Form
                 }
 
                 var selectedLaunch = confirmation.SelectedLaunchOption;
+                await KnownRepositoryAssetService.EnsureAssetsAsync(
+                    normalizedRepository,
+                    selectedLaunch.Arguments,
+                    imported.RootDirectory,
+                    _settings.DataRoot,
+                    _githubClient,
+                    importProgress);
                 status.Text = L("正在创建运行环境并安装依赖……", "Creating the runtime environment and installing dependencies...");
                 await PythonEnvironmentService.EnsureRepositoryAsync(analysis, imported.RootDirectory, _settings.DataRoot, _githubClient, importProgress);
                 var definition = new LauncherModelDefinition
@@ -2912,7 +2919,9 @@ internal sealed class LauncherForm : Form
                     RecommendedVramMiB = analysis.RecommendedVramMiB,
                     RecommendedSystemMemoryMiB = analysis.RecommendedSystemMemoryMiB,
                     IsHighVram = analysis.IsHighVram,
-                    RequiredFiles = [selectedLaunch.EntryScript],
+                    RequiredFiles = new[] { selectedLaunch.EntryScript }
+                        .Concat(KnownRepositoryAssetService.GetRequiredFiles(normalizedRepository, selectedLaunch.Arguments))
+                        .ToArray(),
                     Dependencies = analysis.Dependencies,
                     GitHubRepository = normalizedRepository,
                     GitHubBranch = imported.Branch,
@@ -4422,6 +4431,30 @@ internal sealed class LauncherForm : Form
                 AppendLog(L("插件信任验证失败：", "Plugin trust validation failed: ") + trust.Message, profile, true);
                 ShowActionableError(L("已阻止不可信启动命令", "Untrusted launch command blocked"), trust.Message, profile);
                 return;
+            }
+
+            if (KnownRepositoryAssetService.HasMissingAssets(definition.GitHubRepository, profile.Arguments, profile.WorkingDirectory))
+            {
+                try
+                {
+                    SetRuntimePhase("正在补全 Woosh 模型权重", $"Downloading required Woosh model assets for {profile.Name}");
+                    var progress = new Progress<string>(message => AppendLog(message, profile));
+                    await KnownRepositoryAssetService.EnsureAssetsAsync(
+                        definition.GitHubRepository,
+                        profile.Arguments,
+                        profile.WorkingDirectory,
+                        _settings.DataRoot,
+                        _githubClient,
+                        progress);
+                }
+                catch (Exception ex)
+                {
+                    SetServiceRuntimeState(profile, ServiceRuntimeState.Missing);
+                    SetRuntimePhase("Woosh 模型权重补全失败", $"Woosh model asset repair failed for {profile.Name}");
+                    AppendLog(L("Woosh 模型权重补全失败：", "Woosh model asset repair failed: ") + ex.Message, profile, true);
+                    ShowActionableError(L("Woosh 权重未就绪", "Woosh model assets are not ready"), ex.Message, profile);
+                    return;
+                }
             }
         }
         var missing = GetMissingRequirements(profile);
