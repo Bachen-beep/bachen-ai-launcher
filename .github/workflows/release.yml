@@ -243,3 +243,55 @@ jobs:
           }
           gh attestation verify (Join-Path $verifyRoot "BaChen.AI.Launcher.exe") --repo "${{ github.repository }}"
           gh attestation verify (Join-Path $verifyRoot "BaChen-AI-Launcher-Setup-${{ steps.version.outputs.version }}.exe") --repo "${{ github.repository }}"
+
+      - name: Publish stable update feed last
+        if: steps.version.outputs.prerelease != 'true'
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $repo = "${{ github.repository }}"
+          $branch = "update-feed"
+          $feedPath = Join-Path $env:RUNNER_TEMP "published-release\launcher-update.json"
+          if (-not (Test-Path -LiteralPath $feedPath)) { throw "Verified launcher-update.json was not found." }
+
+          gh api "repos/$repo/git/ref/heads/$branch" --silent 2>$null
+          if ($LASTEXITCODE -ne 0) {
+            gh api --method POST "repos/$repo/git/refs" -f ref="refs/heads/$branch" -f sha="${{ github.sha }}"
+            if ($LASTEXITCODE -ne 0) { throw "Unable to create the $branch branch." }
+          }
+
+          $existingSha = $null
+          $existingJson = gh api "repos/$repo/contents/stable.json?ref=$branch" 2>$null
+          if ($LASTEXITCODE -eq 0) {
+            $existingSha = ($existingJson | ConvertFrom-Json).sha
+          }
+          $body = @{
+            message = "Publish stable update feed ${{ github.ref_name }}"
+            content = [Convert]::ToBase64String([IO.File]::ReadAllBytes($feedPath))
+            branch = $branch
+          }
+          if ($existingSha) { $body.sha = $existingSha }
+          $requestPath = Join-Path $env:RUNNER_TEMP "stable-feed-request.json"
+          [IO.File]::WriteAllText($requestPath, ($body | ConvertTo-Json), [Text.UTF8Encoding]::new($false))
+          gh api --method PUT "repos/$repo/contents/stable.json" --input $requestPath
+          if ($LASTEXITCODE -ne 0) { throw "Unable to publish stable.json." }
+
+          $expected = (Get-FileHash -LiteralPath $feedPath -Algorithm SHA256).Hash
+          $verified = $false
+          foreach ($attempt in 1..12) {
+            try {
+              $downloadPath = Join-Path $env:RUNNER_TEMP "stable-feed-verify.json"
+              Invoke-WebRequest `
+                -Headers @{ "Cache-Control" = "no-cache, no-store"; "Pragma" = "no-cache" } `
+                -Uri "https://raw.githubusercontent.com/$repo/$branch/stable.json?verify=$([Guid]::NewGuid().ToString('N'))" `
+                -OutFile $downloadPath
+              if ((Get-FileHash -LiteralPath $downloadPath -Algorithm SHA256).Hash -eq $expected) {
+                $verified = $true
+                break
+              }
+            }
+            catch { }
+            Start-Sleep -Seconds 5
+          }
+          if (-not $verified) { throw "The stable update feed did not become visible with the verified release manifest." }

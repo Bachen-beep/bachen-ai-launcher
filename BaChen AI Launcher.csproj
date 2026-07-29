@@ -14,10 +14,10 @@
     <Copyright>Copyright (c) 2026 Bachen</Copyright>
     <RepositoryUrl>https://github.com/Bachen-beep/bachen-ai-launcher</RepositoryUrl>
     <RepositoryType>git</RepositoryType>
-    <Version>0.16.14</Version>
-    <AssemblyVersion>0.16.14.0</AssemblyVersion>
-    <FileVersion>0.16.14.0</FileVersion>
-    <InformationalVersion>0.16.6-stage6</InformationalVersion>
+    <Version>0.16.15</Version>
+    <AssemblyVersion>0.16.15.0</AssemblyVersion>
+    <FileVersion>0.16.15.0</FileVersion>
+    <InformationalVersion>0.16.15</InformationalVersion>
     <ApplicationIcon>Assets\BaChenLauncherIcon.ico</ApplicationIcon>
     <Deterministic>true</Deterministic>
   </PropertyGroup>

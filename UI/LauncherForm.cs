@@ -1120,7 +1120,7 @@ internal sealed class LauncherForm : Form
         var plugins = Path.Combine(normalizedRoot, "plugins");
         return new LauncherSettings
         {
-            SchemaVersion = 3,
+            SchemaVersion = 4,
             DataRoot = normalizedRoot,
             WooshRoot = Path.Combine(plugins, "Woosh"),
             StableRoot = Path.Combine(plugins, "Stable Audio 3"),
@@ -1133,7 +1133,7 @@ internal sealed class LauncherForm : Form
 
     private static void NormalizeSettings(LauncherSettings settings)
     {
-        settings.SchemaVersion = 3;
+        settings.SchemaVersion = 4;
         settings.GitHubProxyUrl = TryValidateProxyUrl(settings.GitHubProxyUrl, out _) ? settings.GitHubProxyUrl.Trim() : string.Empty;
         settings.DataRoot = MigrateRenamedPath(settings.DataRoot);
         settings.WooshRoot = MigrateRenamedPath(settings.WooshRoot);
@@ -1408,10 +1408,19 @@ internal sealed class LauncherForm : Form
         {
             SetRuntimePhase("正在检查启动器更新", "Checking launcher updates");
             AppendLog(L("正在验证启动器更新清单……", "Verifying launcher update manifest..."));
-            var check = await _launcherUpdateService.CheckAsync(_settings.LauncherUpdateChannel);
+            var check = await CheckLauncherVersionFromAllSourcesAsync();
             if (!check.IsUpdateAvailable)
             {
-                MessageBox.Show(L($"当前版本 {check.CurrentVersion.ToString(3)} 已是最新版本。", $"Version {check.CurrentVersion.ToString(3)} is up to date."), L("启动器更新", "Launcher update"), MessageBoxButtons.OK, MessageBoxIcon.Information);
+                var conflict = check.HasSourceConflict
+                    ? L("\n不同来源仍有版本差异，已采用签名有效的最高版本。", "\nSources disagree; the highest valid signed version was selected.")
+                    : string.Empty;
+                MessageBox.Show(
+                    L(
+                        $"当前版本 {check.CurrentVersion.ToString(3)} 已是最新版本。\n远端最高版本：{check.LatestVersion.ToString(3)}\n采用来源：{check.SelectedSource}{conflict}",
+                        $"Version {check.CurrentVersion.ToString(3)} is up to date.\nHighest remote version: {check.LatestVersion.ToString(3)}\nSelected source: {check.SelectedSource}{conflict}"),
+                    L("启动器更新", "Launcher update"),
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Information);
                 return;
             }
             var choice = ShowLauncherUpdatePrompt(check);
@@ -1450,7 +1459,7 @@ internal sealed class LauncherForm : Form
         _updateBusy = true;
         try
         {
-            var check = await _launcherUpdateService.CheckAsync(_settings.LauncherUpdateChannel);
+            var check = await CheckLauncherVersionFromAllSourcesAsync();
             if (!check.IsUpdateAvailable || _settings.SkippedLauncherVersion == check.LatestVersion.ToString(3)) return;
             var choice = ShowLauncherUpdatePrompt(check);
             if (choice == LauncherUpdateChoice.Install)
@@ -1487,6 +1496,33 @@ internal sealed class LauncherForm : Form
             Application.Exit();
     }
 
+    private async Task<LauncherUpdateCheck> CheckLauncherVersionFromAllSourcesAsync()
+    {
+        var highestObserved = _settings.LauncherUpdateChannel == LauncherUpdateChannel.Stable &&
+            Version.TryParse(_settings.HighestObservedStableVersion, out var parsed)
+                ? parsed
+                : null;
+        var check = await _launcherUpdateService.CheckAsync(
+            _settings.LauncherUpdateChannel,
+            highestObservedVersion: highestObserved);
+        var sourceSummary = string.Join(" | ", check.Sources.Select(source =>
+            source.IsValid
+                ? $"{source.Name}={source.Version!.ToString(3)}"
+                : $"{source.Name}=失败({source.Detail})"));
+        AppendLog(L(
+            $"启动器更新源：{sourceSummary}；采用 {check.SelectedSource} {check.LatestVersion.ToString(3)}",
+            $"Launcher update sources: {sourceSummary}; selected {check.SelectedSource} {check.LatestVersion.ToString(3)}"));
+        if (_settings.LauncherUpdateChannel == LauncherUpdateChannel.Stable &&
+            (highestObserved is null || check.LatestVersion > highestObserved))
+        {
+            _settings.HighestObservedStableVersion = check.LatestVersion.ToString(3);
+            _settings.HighestObservedStableVersionAt = DateTimeOffset.Now;
+            _settings.HighestObservedStableVersionSource = check.SelectedSource;
+            SaveSettings(_settings);
+        }
+        return check;
+    }
+
     private LauncherUpdateChoice ShowLauncherUpdatePrompt(LauncherUpdateCheck check)
     {
         using var dialog = new Form { Text = L("发现启动器更新", "Launcher update available"), StartPosition = FormStartPosition.CenterParent, FormBorderStyle = FormBorderStyle.FixedDialog, ClientSize = new Size(680, 250), MaximizeBox = false, MinimizeBox = false, ShowInTaskbar = false, BackColor = Theme.Card, Font = new Font("Microsoft YaHei UI", 10F) };
@@ -1509,10 +1545,16 @@ internal sealed class LauncherForm : Form
     {
         if (exception is LauncherUpdateUnavailableException unavailable)
         {
+            var details = unavailable.InnerException?.Message;
             return unavailable.Channel == LauncherUpdateChannel.Stable
-                ? L("目前没有可用的稳定版。你可以继续使用当前版本，或在设置中切换到预览版通道。", "No stable release is currently available. Keep using this version or switch to the Preview channel in Settings.")
-                : L("目前没有可用的预览版，请稍后重试。", "No preview release is currently available. Try again later.");
+                ? L(
+                    $"无法从任何更新源确认稳定版，请检查网络或代理后重试。\n\n来源详情：{details}",
+                    $"No update source could confirm a stable release. Check the network or proxy and try again.\n\nSource details: {details}")
+                : L($"目前没有可用的预览版，请稍后重试。\n\n来源详情：{details}", $"No preview release is currently available. Try again later.\n\nSource details: {details}");
         }
+        if (exception is LauncherUpdateStaleException stale) return L(
+            $"更新源只返回了 {stale.RemoteVersion.ToString(3)}，低于本机曾验证过的 {stale.HighestObservedVersion.ToString(3)}。这通常是缓存或发布同步延迟，当前无法确认最新版，请稍后重试。",
+            $"Update sources returned {stale.RemoteVersion.ToString(3)}, older than the previously verified {stale.HighestObservedVersion.ToString(3)}. This usually indicates stale cache or release propagation; the latest version cannot be confirmed yet.");
         if (exception is TaskCanceledException) return L("网络请求超时。请在“设置”中填写本机可用的 HTTP/HTTPS 代理并测试连接。", "The request timed out. Configure and test an HTTP/HTTPS proxy in Settings.");
         if (exception is HttpRequestException { StatusCode: System.Net.HttpStatusCode.Forbidden } rateLimitError) return L(
             $"GitHub API 拒绝了匿名请求，通常是当前网络出口触发访问频率限制。启动器会优先改用 Stable 直连更新；添加模型可稍后重试或配置代理。\n\n失败详情：{rateLimitError.Message}",
@@ -2015,7 +2057,7 @@ internal sealed class LauncherForm : Form
 
         var updated = new LauncherSettings
         {
-            SchemaVersion = 3,
+            SchemaVersion = 4,
             DataRoot = dataRootBox.Text.Trim(),
             WooshRoot = _settings.WooshRoot,
             StableRoot = _settings.StableRoot,
@@ -2028,6 +2070,9 @@ internal sealed class LauncherForm : Form
             ,GitHubProxyUrl = proxyBox.Text.Trim()
             ,SkippedLauncherVersion = _settings.SkippedLauncherVersion
             ,LauncherUpdateDeferredUntil = _settings.LauncherUpdateDeferredUntil
+            ,HighestObservedStableVersion = _settings.HighestObservedStableVersion
+            ,HighestObservedStableVersionAt = _settings.HighestObservedStableVersionAt
+            ,HighestObservedStableVersionSource = _settings.HighestObservedStableVersionSource
             ,FirstRunCompleted = _settings.FirstRunCompleted
             ,FirstRunWizardStep = _settings.FirstRunWizardStep
             ,FirstRunSelectedPluginIds = _settings.FirstRunSelectedPluginIds

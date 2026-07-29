@@ -94,6 +94,22 @@ internal static class LauncherSelfTests
             launcherUpdate.Sha256 = new string('B', 64);
             AssertThrows(() => LauncherUpdateManifestVerifier.Validate(launcherUpdate, rsa.ExportSubjectPublicKeyInfoPem()), "Launcher update tamper detection", lines);
             launcherUpdate.Sha256 = new string('A', 64);
+            LauncherUpdateManifest CreateSignedLauncherUpdate(string version)
+            {
+                var update = new LauncherUpdateManifest
+                {
+                    Version = version,
+                    MinimumCompatibleVersion = launcherUpdate.MinimumCompatibleVersion,
+                    DownloadUrl = $"https://github.com/Bachen-beep/bachen-ai-launcher/releases/download/v{version}/BaChen.AI.Launcher.exe",
+                    Sha256 = launcherUpdate.Sha256,
+                    ReleaseNotesUrl = $"https://github.com/Bachen-beep/bachen-ai-launcher/releases/tag/v{version}",
+                    PublishedAt = launcherUpdate.PublishedAt.AddMinutes(Version.Parse(version).Minor)
+                };
+                var signedPayload = Encoding.UTF8.GetBytes(LauncherUpdateManifestVerifier.CreateCanonicalPayload(update));
+                update.Signature.Value = Convert.ToBase64String(rsa.SignData(signedPayload, HashAlgorithmName.SHA256, RSASignaturePadding.Pkcs1));
+                update.Signature.KeyId = LauncherUpdateManifestVerifier.KeyId;
+                return update;
+            }
 
             var previewReleaseJson = """
                 [
@@ -115,15 +131,37 @@ internal static class LauncherSelfTests
             var previewManifestUri = await updateService.ResolveManifestUriAsync(LauncherUpdateChannel.Preview);
             Assert(previewManifestUri.AbsoluteUri.Contains("stage2-preview/launcher-update.json", StringComparison.Ordinal), "Preview update channel resolution", lines);
 
-            var fallbackHandler = new StableMissingPreviewHandler();
-            using (var noStableClient = new HttpClient(fallbackHandler))
+            var oldStableUpdate = CreateSignedLauncherUpdate("98.0.0");
+            var tamperedHighUpdate = CreateSignedLauncherUpdate("100.0.0");
+            tamperedHighUpdate.Sha256 = new string('F', 64);
+            var multiSourceHandler = new MultiSourceUpdateHandler(new Dictionary<string, string>
             {
-                var noStableService = new LauncherSelfUpdateService(noStableClient);
-                var unavailable = await AssertThrowsAsync<LauncherUpdateUnavailableException>(
-                    () => noStableService.CheckAsync(LauncherUpdateChannel.Stable),
-                    "Stable channel preview fallback",
+                ["/old.json"] = JsonSerializer.Serialize(oldStableUpdate),
+                ["/latest.json"] = JsonSerializer.Serialize(launcherUpdate),
+                ["/tampered.json"] = JsonSerializer.Serialize(tamperedHighUpdate),
+                ["/api/latest"] = "{\"assets\":[{\"name\":\"launcher-update.json\",\"browser_download_url\":\"https://updates.example/latest.json\"}]}"
+            });
+            using (var multiSourceClient = new HttpClient(multiSourceHandler))
+            {
+                var multiSourceService = new LauncherSelfUpdateService(
+                    multiSourceClient,
+                    () => rsa.ExportSubjectPublicKeyInfoPem(),
+                    [
+                        new LauncherUpdateSource("Cached feed", new Uri("https://updates.example/old.json")),
+                        new LauncherUpdateSource("Current release API", new Uri("https://updates.example/api/latest"), true),
+                        new LauncherUpdateSource("Tampered high version", new Uri("https://updates.example/tampered.json")),
+                        new LauncherUpdateSource("Unavailable feed", new Uri("https://updates.example/missing.json"))
+                    ]);
+                var selectedUpdate = await multiSourceService.CheckAsync(LauncherUpdateChannel.Stable);
+                Assert(selectedUpdate.LatestVersion == new Version(99, 0, 0) && selectedUpdate.SelectedSource == "Current release API", "Stable multi-source selects highest signed version", lines);
+                Assert(selectedUpdate.HasSourceConflict && selectedUpdate.Sources.Count == 4, "Stable multi-source conflict diagnostics", lines);
+                Assert(selectedUpdate.Sources.Single(source => source.Name == "Tampered high version").IsValid == false, "Unsigned higher update source is rejected", lines);
+                Assert(multiSourceHandler.AllRequestsBypassCache, "Launcher update requests bypass ordinary caches", lines);
+                var stale = await AssertThrowsAsync<LauncherUpdateStaleException>(
+                    () => multiSourceService.CheckAsync(LauncherUpdateChannel.Stable, highestObservedVersion: new Version(100, 0, 0)),
+                    "Previously observed stable version rejects stale sources",
                     lines);
-                Assert(unavailable.Channel == LauncherUpdateChannel.Preview && fallbackHandler.RequestCount == 2, "Missing stable release falls back to preview API", lines);
+                Assert(stale.RemoteVersion == new Version(99, 0, 0), "Stale update source classification", lines);
             }
             using (var noPreviewClient = new HttpClient(new StaticJsonHandler("[]")))
             {
@@ -136,10 +174,13 @@ internal static class LauncherSelfTests
             }
             using (var serverFailureClient = new HttpClient(new StatusCodeHandler(System.Net.HttpStatusCode.InternalServerError)))
             {
-                var serverFailureService = new LauncherSelfUpdateService(serverFailureClient);
-                await AssertThrowsAsync<HttpRequestException>(
+                var serverFailureService = new LauncherSelfUpdateService(
+                    serverFailureClient,
+                    () => rsa.ExportSubjectPublicKeyInfoPem(),
+                    [new LauncherUpdateSource("Only source", new Uri("https://updates.example/stable.json"))]);
+                await AssertThrowsAsync<LauncherUpdateUnavailableException>(
                     () => serverFailureService.CheckAsync(LauncherUpdateChannel.Stable),
-                    "GitHub server failure remains a network error",
+                    "All stable update sources unavailable classification",
                     lines);
             }
             using (var previewRateLimitedClient = new HttpClient(new StatusCodeHandler(System.Net.HttpStatusCode.Forbidden)))
@@ -545,6 +586,12 @@ internal static class LauncherSelfTests
             LauncherConfigurationStore.SaveAtomic(settingsPath, loadedSettings);
             var previewSettings = LauncherConfigurationStore.LoadOrCreate(settingsPath, () => new LauncherSettings());
             Assert(previewSettings.LauncherUpdateChannel == LauncherUpdateChannel.Preview, "Preview update channel persistence", lines);
+            previewSettings.HighestObservedStableVersion = "99.0.0";
+            previewSettings.HighestObservedStableVersionAt = DateTimeOffset.Parse("2026-07-29T00:00:00Z");
+            previewSettings.HighestObservedStableVersionSource = "GitHub Raw";
+            LauncherConfigurationStore.SaveAtomic(settingsPath, previewSettings);
+            previewSettings = LauncherConfigurationStore.LoadOrCreate(settingsPath, () => new LauncherSettings());
+            Assert(previewSettings.HighestObservedStableVersion == "99.0.0" && previewSettings.HighestObservedStableVersionSource == "GitHub Raw", "Highest observed stable version persistence", lines);
             Assert(previewSettings.FirstRunCompleted, "Existing-user first-run migration default", lines);
             previewSettings.FirstRunCompleted = false;
             previewSettings.FirstRunWizardStep = 3;
@@ -762,6 +809,33 @@ internal static class LauncherSelfTests
     {
         protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
             => Task.FromResult(new HttpResponseMessage(statusCode));
+    }
+
+    private sealed class MultiSourceUpdateHandler(IReadOnlyDictionary<string, string> responses) : HttpMessageHandler
+    {
+        private readonly List<bool> cacheChecks = [];
+
+        public bool AllRequestsBypassCache => cacheChecks.Count > 0 && cacheChecks.All(value => value);
+
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            cacheChecks.Add(
+                request.RequestUri?.Query.Contains("bachen_request=", StringComparison.Ordinal) == true &&
+                request.Headers.CacheControl?.NoCache == true &&
+                request.Headers.CacheControl?.NoStore == true);
+            if (request.RequestUri is not null && responses.TryGetValue(request.RequestUri.AbsolutePath, out var json))
+            {
+                return Task.FromResult(new HttpResponseMessage(System.Net.HttpStatusCode.OK)
+                {
+                    RequestMessage = request,
+                    Content = new StringContent(json, Encoding.UTF8, "application/json")
+                });
+            }
+            return Task.FromResult(new HttpResponseMessage(System.Net.HttpStatusCode.ServiceUnavailable)
+            {
+                RequestMessage = request
+            });
+        }
     }
 
     private sealed class StableMissingPreviewHandler : HttpMessageHandler

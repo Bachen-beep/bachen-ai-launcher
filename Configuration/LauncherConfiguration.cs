@@ -40,7 +40,7 @@ internal static class LauncherPaths
 
 internal sealed class LauncherSettings
 {
-    public int SchemaVersion { get; set; } = 3;
+    public int SchemaVersion { get; set; } = 4;
     public string DataRoot { get; set; } = LauncherPaths.DefaultDataDirectory;
     public string WooshRoot { get; set; } = Path.Combine(LauncherPaths.DefaultDataDirectory, "plugins", "Woosh");
     public string StableRoot { get; set; } = Path.Combine(LauncherPaths.DefaultDataDirectory, "plugins", "Stable Audio 3");
@@ -53,6 +53,9 @@ internal sealed class LauncherSettings
     public string GitHubProxyUrl { get; set; } = string.Empty;
     public string SkippedLauncherVersion { get; set; } = string.Empty;
     public DateTimeOffset? LauncherUpdateDeferredUntil { get; set; }
+    public string HighestObservedStableVersion { get; set; } = string.Empty;
+    public DateTimeOffset? HighestObservedStableVersionAt { get; set; }
+    public string HighestObservedStableVersionSource { get; set; } = string.Empty;
     public bool FirstRunCompleted { get; set; } = true;
     public int FirstRunWizardStep { get; set; }
     public string[] FirstRunSelectedPluginIds { get; set; } = [];
