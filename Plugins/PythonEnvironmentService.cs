@@ -13,30 +13,61 @@ internal static class PythonEnvironmentService
         IProgress<string>? progress = null,
         CancellationToken cancellationToken = default)
     {
+        if (analysis.EnvironmentManager.Equals("uv", StringComparison.OrdinalIgnoreCase))
+        {
+            var managedPython = await new ManagedPythonRuntimeService(httpClient).EnsureAsync(
+                ManagedPythonRuntimeService.Python312.Id,
+                dataRoot,
+                progress,
+                cancellationToken: cancellationToken);
+            var uvExecutable = await EnsureExternalUvAsync(managedPython, dataRoot, progress, cancellationToken);
+            progress?.Report("Synchronizing repository dependencies with external uv");
+            await RunAsync(uvExecutable, BuildUvSyncArguments(analysis.EnvironmentArguments, managedPython), pluginRoot, cancellationToken);
+            await ValidateVersionAsync(Path.Combine(pluginRoot, ".venv", "Scripts", "python.exe"), analysis.RuntimeVersion, pluginRoot, cancellationToken);
+            return;
+        }
+
         var baseManifest = new PluginPackageManifest
         {
             Runtime = analysis.Runtime,
             RuntimeVersion = analysis.RuntimeVersion,
             CreateVirtualEnvironment = true,
             VirtualEnvironmentPath = ".venv",
-            RequirementsFile = analysis.EnvironmentManager.Equals("uv", StringComparison.OrdinalIgnoreCase) ? string.Empty : analysis.RequirementsFile,
+            RequirementsFile = analysis.RequirementsFile,
             ManagedRuntimeId = ManagedPythonRuntimeService.Python312.Id,
             PythonInstallArguments = analysis.EnvironmentManager.Equals("pip", StringComparison.OrdinalIgnoreCase) && File.Exists(Path.Combine(pluginRoot, "pyproject.toml"))
                 ? ["-m", "pip", "install", "--disable-pip-version-check", "-e", "."]
                 : []
         };
         await EnsureAsync(baseManifest, pluginRoot, dataRoot, httpClient, progress, cancellationToken: cancellationToken);
-        if (!analysis.EnvironmentManager.Equals("uv", StringComparison.OrdinalIgnoreCase))
-        {
-            return;
-        }
+    }
 
-        var environmentPython = Path.Combine(pluginRoot, ".venv", "Scripts", "python.exe");
-        progress?.Report("Installing the uv environment manager");
-        await RunAsync(environmentPython, ["-m", "pip", "install", "--disable-pip-version-check", "uv"], pluginRoot, cancellationToken);
-        var uvExecutable = Path.Combine(pluginRoot, ".venv", "Scripts", "uv.exe");
-        progress?.Report("Synchronizing repository dependencies with uv");
-        await RunAsync(uvExecutable, analysis.EnvironmentArguments, pluginRoot, cancellationToken);
+    internal static string[] BuildUvSyncArguments(IEnumerable<string> detectedArguments, string managedPython)
+    {
+        var arguments = detectedArguments.Where(argument => !argument.Equals("--active", StringComparison.OrdinalIgnoreCase)).ToList();
+        arguments.Add("--python");
+        arguments.Add(managedPython);
+        return arguments.ToArray();
+    }
+
+    private static async Task<string> EnsureExternalUvAsync(string managedPython, string dataRoot, IProgress<string>? progress, CancellationToken cancellationToken)
+    {
+        var toolRoot = Path.Combine(Path.GetFullPath(dataRoot), "tools", "uv");
+        var toolPython = Path.Combine(toolRoot, "Scripts", "python.exe");
+        var uvExecutable = Path.Combine(toolRoot, "Scripts", "uv.exe");
+        if (File.Exists(uvExecutable))
+        {
+            return uvExecutable;
+        }
+        Directory.CreateDirectory(Path.GetDirectoryName(toolRoot)!);
+        if (!File.Exists(toolPython))
+        {
+            progress?.Report("Creating the external uv tool environment");
+            await RunAsync(managedPython, ["-m", "venv", toolRoot], dataRoot, cancellationToken);
+        }
+        progress?.Report("Installing the external uv environment manager");
+        await RunAsync(toolPython, ["-m", "pip", "install", "--disable-pip-version-check", "uv"], toolRoot, cancellationToken);
+        return File.Exists(uvExecutable) ? uvExecutable : throw new FileNotFoundException("The external uv executable was not installed.", uvExecutable);
     }
 
     public static async Task EnsureAsync(PluginPackageManifest manifest, string pluginRoot, string dataRoot, HttpClient httpClient, IProgress<string>? progress = null, IProgress<PluginDownloadProgress>? downloadProgress = null, CancellationToken cancellationToken = default)

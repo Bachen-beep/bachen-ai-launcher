@@ -132,7 +132,7 @@ internal static class GitHubRepositoryAnalyzer
     {
         var profile = hasNvidiaGpu ? "cuda" : "cpu";
         var supportsProfile = Regex.IsMatch(pyproject, $@"\b{profile}\s*=", RegexOptions.IgnoreCase) || Regex.IsMatch(readme, $@"uv\s+sync[^\r\n]*--extra\s+{profile}\b", RegexOptions.IgnoreCase);
-        return supportsProfile ? ["sync", "--active", "--extra", profile] : ["sync", "--active"];
+        return supportsProfile ? ["sync", "--extra", profile] : ["sync"];
     }
 
     private static string FindRequirementsFile(string root)

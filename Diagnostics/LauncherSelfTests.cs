@@ -333,6 +333,8 @@ internal static class LauncherSelfTests
             Assert(wooshAnalysis.LaunchOptions.Length == 2 && wooshAnalysis.LaunchOptions[0].EntryScript == "gradio_Woosh-DFlow.py", "Repository analyzer recommends Woosh DFlow", lines);
             Assert(wooshAnalysis.LaunchOptions[0].Arguments.Contains("--server-port {port}", StringComparison.Ordinal) && wooshAnalysis.EnvironmentManager == "uv" && wooshAnalysis.EnvironmentArguments.Contains("cuda"), "Repository analyzer configures Woosh port and CUDA uv profile", lines);
             Assert(wooshAnalysis.RuntimeVersion == ">=3.12" && wooshAnalysis.Category == "Audio generation", "Repository analyzer reads Python and category metadata", lines);
+            var managedUvArguments = PythonEnvironmentService.BuildUvSyncArguments(wooshAnalysis.EnvironmentArguments, @"C:\managed-python\python.exe");
+            Assert(managedUvArguments.Contains("--python") && managedUvArguments.Contains(@"C:\managed-python\python.exe") && !managedUvArguments.Contains("--active"), "External uv sync pins managed Python without self-hosted environment", lines);
 
             var analyzedGenericRoot = Path.Combine(testRoot, "analyzed-generic");
             Directory.CreateDirectory(analyzedGenericRoot);
