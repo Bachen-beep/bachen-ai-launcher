@@ -338,6 +338,16 @@ internal static class LauncherSelfTests
             Assert(wooshAnalysis.LaunchOptions[0].Arguments.Contains("--server-port {port}", StringComparison.Ordinal) && wooshAnalysis.EnvironmentManager == "uv" && wooshAnalysis.EnvironmentArguments.Contains("cuda"), "Repository analyzer configures Woosh port and CUDA uv profile", lines);
             Assert(KnownRepositoryAssetService.GetRequiredFiles("SonyResearch/Woosh", wooshAnalysis.LaunchOptions[0].Arguments).SequenceEqual(["checkpoints/Woosh-AE/config.yaml", "checkpoints/Woosh-AE/weights.safetensors", "checkpoints/TextConditionerA/config.yaml", "checkpoints/TextConditionerA/weights.safetensors", "checkpoints/Woosh-DFlow/config.yaml", "checkpoints/Woosh-DFlow/weights.safetensors"]), "Woosh DFlow import requires checkpoint files rather than placeholder directories", lines);
             Assert(KnownRepositoryAssetService.GetRequiredFiles("example/generic", wooshAnalysis.LaunchOptions[0].Arguments).Length == 0, "Generic imports do not receive Woosh checkpoint requirements", lines);
+            var nestedCheckpointRoot = Path.Combine(analyzedWooshRoot, "checkpoints", "checkpoints");
+            foreach (var relative in KnownRepositoryAssetService.GetRequiredFiles("SonyResearch/Woosh", wooshAnalysis.LaunchOptions[0].Arguments))
+            {
+                var nestedFile = Path.Combine(nestedCheckpointRoot, relative["checkpoints/".Length..].Replace('/', Path.DirectorySeparatorChar));
+                Directory.CreateDirectory(Path.GetDirectoryName(nestedFile)!);
+                await File.WriteAllTextAsync(nestedFile, "fixture", Encoding.ASCII);
+            }
+            KnownRepositoryAssetService.RepairNestedCheckpointLayout("SonyResearch/Woosh", wooshAnalysis.LaunchOptions[0].Arguments, analyzedWooshRoot);
+            Assert(!KnownRepositoryAssetService.HasMissingAssets("SonyResearch/Woosh", wooshAnalysis.LaunchOptions[0].Arguments, analyzedWooshRoot), "Woosh checkpoint repair removes the duplicated checkpoints directory level", lines);
+            Assert(!Directory.Exists(nestedCheckpointRoot), "Woosh checkpoint repair removes the empty nested checkpoint directory", lines);
             Assert(wooshAnalysis.RuntimeVersion == ">=3.12" && wooshAnalysis.Category == "Audio generation", "Repository analyzer reads Python and category metadata", lines);
             var managedUvArguments = PythonEnvironmentService.BuildUvSyncArguments(wooshAnalysis.EnvironmentArguments, @"C:\managed-python\python.exe");
             Assert(managedUvArguments.Contains("--python") && managedUvArguments.Contains(@"C:\managed-python\python.exe") && !managedUvArguments.Contains("--active"), "External uv sync pins managed Python without self-hosted environment", lines);
