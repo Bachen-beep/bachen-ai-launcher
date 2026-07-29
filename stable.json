@@ -1,0 +1,13 @@
+{
+  "Version": "0.16.15",
+  "MinimumCompatibleVersion": "0.11.0",
+  "DownloadUrl": "https://github.com/Bachen-beep/bachen-ai-launcher/releases/download/v0.16.15/BaChen.AI.Launcher.exe",
+  "Sha256": "99DE7CB2352B04909ABFDE19DA7235C5A15918F955852C84D94BA719DA1DD1CE",
+  "ReleaseNotesUrl": "https://github.com/Bachen-beep/bachen-ai-launcher/releases/tag/v0.16.15",
+  "PublishedAt": "2026-07-29T09:20:46.4606258+00:00",
+  "Signature": {
+    "KeyId": "bachen-launcher-release-2026",
+    "Algorithm": "RSA-SHA256",
+    "Value": "DnYB3kFq4JTzLJBlDqLSkFWbcHvPXPeuWfakV457kbDuh5\u002BacfzaOvfTqteCB3uzNJxejDU83M2\u002BK\u002BDhxW/K5StfnSSKeUW6bIMBq8R7nJo00lR\u002BS7GKUb4rpCN/dN6QphA\u002BKB4RefqaU/MyJaNhT9IUhEd\u002B8\u002BcIEfyDbwWhA7NespxYAwSue0kySoSXNYk4ms9a6ufyWvJIKggVbUmyP9EdtvrkbrqqUH6nY5p/q2VtWqZWYnn9H\u002BfkOpvykYLcjmy0gqvsp3zjPMq6LcvN\u002BthBJokPfBCeAsUqPgSNLP/I5uCDv94dL33M5LWgTVNDoeIRjFJV1M5woo4/6fqWWbZ3ttAHykh0R6zamCMMr1yLRZQa7Ct2Mi1B2WkqrW35kGKqCd3Iw/kvmYzHTRUBFCEL9jtAVcDcyLEV0telzCDR3tnZbWr\u002B2OaaaOPpKFf1fN4Req58eOCIBtFrsKGpBbhCQTFJhUCFpDmDZdZSZMp7AC2rJYKmfZMrsn3Uoe9g"
+  }
+}
