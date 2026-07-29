@@ -916,19 +916,39 @@ internal sealed class LauncherForm : Form
         }
         _updateSources = updateSources.ToArray();
         _woosh = CreateSpecialProfile("woosh-dflow");
-        _smallSfx = CreateSpecialProfile("stable-audio-3", "run_gradio.py --model small-sfx --port {port}");
-        _smallMusic = CreateSpecialProfile("stable-audio-3", "run_gradio.py --model small-music --port {port}");
-        _medium = CreateSpecialProfile("stable-audio-3", "run_gradio.py --model medium --port {port}", true, 8800, 16384);
+        var stableDefinition = _modelCatalog.Models.FirstOrDefault(IsStableAudioDefinition);
+        _smallSfx = CreateSpecialProfile(stableDefinition, "run_gradio.py --model small-sfx --port {port}", false, 2200, 8192);
+        _smallMusic = CreateSpecialProfile(stableDefinition, "run_gradio.py --model small-music --port {port}", false, 2200, 8192);
+        _medium = CreateSpecialProfile(stableDefinition, "run_gradio.py --model medium --port {port}", true, 8800, 16384);
         _indexTts = CreateSpecialProfile("indextts2");
         if (_selectedStableProfile is null || _smallSfx is null || !_selectedStableProfile.WorkingDirectory.Equals(_smallSfx.WorkingDirectory, StringComparison.OrdinalIgnoreCase))
         {
-            _selectedStableProfile = _smallSfx;
+            _selectedStableProfile = KnownRepositoryAuthorizationService.GetStableAudioModel(
+                stableDefinition?.GitHubRepository ?? string.Empty,
+                stableDefinition?.Arguments ?? string.Empty) switch
+            {
+                "small-music" => _smallMusic,
+                "medium" => _medium,
+                _ => _smallSfx
+            };
         }
     }
 
     private ServiceProfile? CreateSpecialProfile(string id, string? arguments = null, bool? isHighVram = null, int? recommendedVramMiB = null, int? recommendedSystemMemoryMiB = null)
     {
         var definition = _modelCatalog.Models.FirstOrDefault(item => item.Id.Equals(id, StringComparison.OrdinalIgnoreCase));
+        return CreateSpecialProfile(definition, arguments, isHighVram, recommendedVramMiB, recommendedSystemMemoryMiB);
+    }
+
+    private static bool IsStableAudioDefinition(LauncherModelDefinition definition)
+        => definition.Id.Equals("stable-audio-3", StringComparison.OrdinalIgnoreCase) ||
+           definition.GitHubRepository.Equals("Stability-AI/stable-audio-3", StringComparison.OrdinalIgnoreCase);
+
+    internal static bool SupportsStableAudioProfiles(LauncherModelDefinition definition)
+        => IsStableAudioDefinition(definition);
+
+    private ServiceProfile? CreateSpecialProfile(LauncherModelDefinition? definition, string? arguments = null, bool? isHighVram = null, int? recommendedVramMiB = null, int? recommendedSystemMemoryMiB = null)
+    {
         if (definition is null)
         {
             return null;
@@ -3640,7 +3660,7 @@ internal sealed class LauncherForm : Form
     {
         return _modelCatalog.Models.Select(definition =>
         {
-            var hasStableSelector = definition.Id.Equals("stable-audio-3", StringComparison.OrdinalIgnoreCase) &&
+            var hasStableSelector = IsStableAudioDefinition(definition) &&
                 _selectedStableProfile is not null && _smallSfx is not null && _smallMusic is not null && _medium is not null;
             var profile = hasStableSelector ? _selectedStableProfile! : CreateCustomProfile(definition);
             return new PluginUiEntry(
@@ -3756,7 +3776,7 @@ internal sealed class LauncherForm : Form
                 return;
             }
             _selectedStableProfile = profile;
-            var index = _pluginEntries.FindIndex(entry => entry.Id == "stable-audio-3");
+            var index = _pluginEntries.FindIndex(entry => entry.HasModelSelector);
             if (index >= 0)
             {
                 _pluginEntries[index] = _pluginEntries[index] with
@@ -3948,6 +3968,10 @@ internal sealed class LauncherForm : Form
 
     private void ToggleLogDrawer()
     {
+        if (_logAnimationTimer.Enabled)
+        {
+            return;
+        }
         if (!_logExpanded)
         {
             _logExpandsWindowDownward = WindowState == FormWindowState.Normal;
@@ -3957,18 +3981,13 @@ internal sealed class LauncherForm : Form
         if (_logToggleButton is not null)
         {
             _logToggleButton.Text = _logExpanded ? L("收起", "Collapse") : L("展开", "Expand");
+            _logToggleButton.Enabled = false;
             _logToggleButton.Invalidate();
         }
-        _log.Visible = _logExpanded;
-        if (_log.Parent is not null)
+        if (_logExpanded)
         {
-            foreach (Control control in _log.Parent.Controls)
-            {
-                if (control is RoundedButton button && !ReferenceEquals(button, _logToggleButton))
-                {
-                    button.Visible = _logExpanded;
-                }
-            }
+            SetLogDrawerContentVisible(true);
+            ApplyDownwardLogWindowBounds(210, 72);
         }
         _logAnimationTimer.Start();
     }
@@ -3987,18 +4006,46 @@ internal sealed class LauncherForm : Form
         if (Math.Abs(difference) <= 8)
         {
             _logHost.Height = target;
-            ApplyDownwardLogWindowBounds(target, collapsedHeight);
             if (!_logExpanded)
             {
+                SetLogDrawerContentVisible(false);
+                RestoreCollapsedLogWindowBounds();
                 _logCollapsedWindowBounds = null;
                 _logExpandsWindowDownward = false;
+            }
+            if (_logToggleButton is not null)
+            {
+                _logToggleButton.Enabled = true;
             }
             _logAnimationTimer.Stop();
             return;
         }
         var nextHeight = _logHost.Height + Math.Sign(difference) * Math.Max(8, Math.Abs(difference) / 4);
         _logHost.Height = Math.Clamp(nextHeight, Math.Min(_logHost.Height, target), Math.Max(_logHost.Height, target));
-        ApplyDownwardLogWindowBounds(_logHost.Height, collapsedHeight);
+    }
+
+    private void SetLogDrawerContentVisible(bool visible)
+    {
+        _log.Visible = visible;
+        if (_log.Parent is null)
+        {
+            return;
+        }
+        foreach (Control control in _log.Parent.Controls)
+        {
+            if (control is RoundedButton button && !ReferenceEquals(button, _logToggleButton))
+            {
+                button.Visible = visible;
+            }
+        }
+    }
+
+    private void RestoreCollapsedLogWindowBounds()
+    {
+        if (_logExpandsWindowDownward && _logCollapsedWindowBounds is { } collapsedBounds && WindowState == FormWindowState.Normal)
+        {
+            Bounds = collapsedBounds;
+        }
     }
 
     private void ApplyDownwardLogWindowBounds(int logHeight, int collapsedLogHeight)

@@ -379,6 +379,14 @@ internal static class LauncherSelfTests
             Assert(smallMusicAuthorization?.ModelId == "stabilityai/stable-audio-3-small-music", "Stable Audio Small Music launch checks the matching gated repository", lines);
             Assert(mediumAuthorization?.ModelId == "stabilityai/stable-audio-3-medium" && mediumAuthorization.AuthorizationProbePath == "model_config.json", "Stable Audio Medium launch checks protected model access", lines);
             Assert(KnownRepositoryAuthorizationService.CreateLaunchManifest("Stability-AI/stable-audio-3", "run_gradio.py --model unknown", "Stable Audio 3") is null, "Unknown Stable Audio model is not assigned unrelated credentials", lines);
+            var importedStableDefinition = new LauncherModelDefinition
+            {
+                Id = "stability-ai-stable-audio-3",
+                GitHubRepository = "Stability-AI/stable-audio-3",
+                Arguments = "run_gradio.py --model medium"
+            };
+            Assert(LauncherForm.SupportsStableAudioProfiles(importedStableDefinition), "GitHub-imported Stable Audio exposes all launch profiles", lines);
+            Assert(KnownRepositoryAuthorizationService.GetStableAudioModel(importedStableDefinition.GitHubRepository, importedStableDefinition.Arguments) == "medium", "Stable Audio preserves the selected installation profile", lines);
             var credentialStartInfo = new System.Diagnostics.ProcessStartInfo();
             KnownRepositoryAuthorizationService.ApplyCredential(credentialStartInfo, "  self-test-token  ");
             Assert(credentialStartInfo.Environment["HF_TOKEN"] == "self-test-token" && !credentialStartInfo.ArgumentList.Contains("self-test-token"), "Hugging Face credential is injected through the child environment only", lines);
