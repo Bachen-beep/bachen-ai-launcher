@@ -1,6 +1,7 @@
 using System.IO.Compression;
 using System.Text.Json;
 using System.Text.RegularExpressions;
+using System.Xml.Linq;
 
 namespace BaChenAiLauncher;
 
@@ -48,28 +49,18 @@ internal sealed class GitHubModelImportService(HttpClient httpClient)
             throw new InvalidDataException("GitHub repository is invalid.");
         }
         branch = branch.Trim();
-        if (string.IsNullOrWhiteSpace(branch))
+        string commitSha;
+        try
         {
-            progress?.Report("Resolving the repository default branch");
-            var repositoryJson = await httpClient.GetStringAsync($"https://api.github.com/repos/{repository}", cancellationToken);
-            using var repositoryDocument = JsonDocument.Parse(repositoryJson);
-            branch = repositoryDocument.RootElement.GetProperty("default_branch").GetString() ?? string.Empty;
+            (branch, commitSha) = await ResolveFromApiAsync(repository, branch, progress, cancellationToken);
         }
-        if (!Regex.IsMatch(branch, "^[A-Za-z0-9._/-]+$") || branch.Contains("..", StringComparison.Ordinal))
+        catch (HttpRequestException ex) when (ex.StatusCode is System.Net.HttpStatusCode.Forbidden or System.Net.HttpStatusCode.TooManyRequests)
         {
-            throw new InvalidDataException("GitHub default branch is missing or invalid.");
+            progress?.Report("GitHub API rate limit reached; resolving the repository through its public Atom feed");
+            (branch, commitSha) = await ResolveFromAtomAsync(repository, branch, cancellationToken);
         }
 
-        progress?.Report("Resolving the GitHub branch to an immutable commit");
-        var commitJson = await httpClient.GetStringAsync(
-            $"https://api.github.com/repos/{repository}/commits/{Uri.EscapeDataString(branch)}",
-            cancellationToken);
-        using var commitDocument = JsonDocument.Parse(commitJson);
-        var commitSha = commitDocument.RootElement.GetProperty("sha").GetString();
-        if (string.IsNullOrWhiteSpace(commitSha) || !Regex.IsMatch(commitSha, "^[a-fA-F0-9]{40}$"))
-        {
-            throw new InvalidDataException("GitHub did not return a valid commit SHA.");
-        }
+        ValidateResolvedSource(branch, commitSha);
 
         var safeId = SanitizeId(repository.Replace('/', '-'));
         var pluginsRoot = Path.GetFullPath(Path.Combine(dataRoot, "plugins"));
@@ -174,6 +165,65 @@ internal sealed class GitHubModelImportService(HttpClient httpClient)
             {
                 Directory.Delete(stagingRoot, true);
             }
+        }
+    }
+
+    private async Task<(string Branch, string CommitSha)> ResolveFromApiAsync(string repository, string branch, IProgress<string>? progress, CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(branch))
+        {
+            progress?.Report("Resolving the repository default branch");
+            var repositoryJson = await httpClient.GetStringAsync($"https://api.github.com/repos/{repository}", cancellationToken);
+            using var repositoryDocument = JsonDocument.Parse(repositoryJson);
+            branch = repositoryDocument.RootElement.GetProperty("default_branch").GetString() ?? string.Empty;
+        }
+
+        ValidateBranch(branch);
+        progress?.Report("Resolving the GitHub branch to an immutable commit");
+        var commitJson = await httpClient.GetStringAsync(
+            $"https://api.github.com/repos/{repository}/commits/{Uri.EscapeDataString(branch)}",
+            cancellationToken);
+        using var commitDocument = JsonDocument.Parse(commitJson);
+        return (branch, commitDocument.RootElement.GetProperty("sha").GetString() ?? string.Empty);
+    }
+
+    private async Task<(string Branch, string CommitSha)> ResolveFromAtomAsync(string repository, string branch, CancellationToken cancellationToken)
+    {
+        var feedUrl = string.IsNullOrWhiteSpace(branch)
+            ? $"https://github.com/{repository}/commits.atom"
+            : $"https://github.com/{repository}/commits/{Uri.EscapeDataString(branch)}.atom";
+        using var response = await httpClient.GetAsync(feedUrl, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
+        response.EnsureSuccessStatusCode();
+        await using var stream = await response.Content.ReadAsStreamAsync(cancellationToken);
+        var feed = await XDocument.LoadAsync(stream, LoadOptions.None, cancellationToken);
+        XNamespace atom = "http://www.w3.org/2005/Atom";
+        if (string.IsNullOrWhiteSpace(branch))
+        {
+            var selfLink = feed.Root?.Elements(atom + "link")
+                .FirstOrDefault(element => element.Attribute("rel")?.Value.Equals("self", StringComparison.OrdinalIgnoreCase) == true)
+                ?.Attribute("href")?.Value;
+            var match = Regex.Match(selfLink ?? string.Empty, @"/commits/(?<branch>.+)\.atom$");
+            branch = match.Success ? Uri.UnescapeDataString(match.Groups["branch"].Value) : string.Empty;
+        }
+        var entryId = feed.Root?.Element(atom + "entry")?.Element(atom + "id")?.Value ?? string.Empty;
+        var commitSha = entryId.Split('/').LastOrDefault() ?? string.Empty;
+        return (branch, commitSha);
+    }
+
+    private static void ValidateResolvedSource(string branch, string commitSha)
+    {
+        ValidateBranch(branch);
+        if (string.IsNullOrWhiteSpace(commitSha) || !Regex.IsMatch(commitSha, "^[a-fA-F0-9]{40}$"))
+        {
+            throw new InvalidDataException("GitHub did not return a valid commit SHA.");
+        }
+    }
+
+    private static void ValidateBranch(string branch)
+    {
+        if (!Regex.IsMatch(branch, "^[A-Za-z0-9._/-]+$") || branch.Contains("..", StringComparison.Ordinal))
+        {
+            throw new InvalidDataException("GitHub default branch is missing or invalid.");
         }
     }
 

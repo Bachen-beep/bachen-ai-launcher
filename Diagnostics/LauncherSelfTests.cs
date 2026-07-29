@@ -328,6 +328,13 @@ internal static class LauncherSelfTests
                 var customImported = await new GitHubModelImportService(importClient).ImportAsync("example/custom-location", "main", importRoot, customInstallDirectory);
                 Assert(customImported.RootDirectory == Path.GetFullPath(customInstallDirectory) && File.Exists(Path.Combine(customInstallDirectory, "app.py")), "User-selected empty GitHub plugin install directory", lines);
             }
+            using (var rateLimitedImportClient = new HttpClient(new RateLimitedGitHubImportHandler(importedCommit, gitHubArchiveBytes)))
+            {
+                rateLimitedImportClient.DefaultRequestHeaders.UserAgent.ParseAdd("BaChen-Self-Test");
+                var rateLimitedRoot = Path.Combine(testRoot, "github-rate-limited-import");
+                var imported = await new GitHubModelImportService(rateLimitedImportClient).ImportAsync("example/rate-limited", string.Empty, rateLimitedRoot);
+                Assert(imported.Branch == "main" && imported.CommitSha == importedCommit && File.Exists(Path.Combine(imported.RootDirectory, "app.py")), "GitHub rate limit falls back to the public Atom feed", lines);
+            }
 
             var analyzedWooshRoot = Path.Combine(testRoot, "analyzed-woosh");
             Directory.CreateDirectory(analyzedWooshRoot);
@@ -685,6 +692,35 @@ internal static class LauncherSelfTests
                 {
                     RequestMessage = request,
                     Content = new StringContent($"{{\"sha\":\"{commitSha}\"}}", Encoding.UTF8, "application/json")
+                });
+            }
+            return Task.FromResult(new HttpResponseMessage(System.Net.HttpStatusCode.OK)
+            {
+                RequestMessage = request,
+                Content = new ByteArrayContent(archiveBytes)
+            });
+        }
+    }
+
+    private sealed class RateLimitedGitHubImportHandler(string commitSha, byte[] archiveBytes) : HttpMessageHandler
+    {
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            if (request.RequestUri?.Host.Equals("api.github.com", StringComparison.OrdinalIgnoreCase) == true)
+            {
+                return Task.FromResult(new HttpResponseMessage(System.Net.HttpStatusCode.Forbidden)
+                {
+                    RequestMessage = request,
+                    Content = new StringContent("{\"message\":\"API rate limit exceeded\"}", Encoding.UTF8, "application/json")
+                });
+            }
+            if (request.RequestUri?.AbsolutePath.EndsWith("/commits.atom", StringComparison.OrdinalIgnoreCase) == true)
+            {
+                var feed = $"<?xml version=\"1.0\" encoding=\"UTF-8\"?><feed xmlns=\"http://www.w3.org/2005/Atom\"><link rel=\"self\" href=\"https://github.com/example/rate-limited/commits/main.atom\"/><entry><id>tag:github.com,2008:Grit::Commit/{commitSha}</id></entry></feed>";
+                return Task.FromResult(new HttpResponseMessage(System.Net.HttpStatusCode.OK)
+                {
+                    RequestMessage = request,
+                    Content = new StringContent(feed, Encoding.UTF8, "application/atom+xml")
                 });
             }
             return Task.FromResult(new HttpResponseMessage(System.Net.HttpStatusCode.OK)
