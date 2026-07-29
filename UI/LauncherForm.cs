@@ -2552,14 +2552,34 @@ internal sealed class LauncherForm : Form
         }
     }
 
+    private sealed record ExternalAuthorizationPromptResult(bool IsAuthorized, string Token);
+
     private async Task<bool> EnsureExternalAuthorizationAsync(PluginPackageManifest manifest)
+        => (await RequestExternalAuthorizationAsync(manifest, trySavedCredentialFirst: false)).IsAuthorized;
+
+    private Task<ExternalAuthorizationPromptResult> EnsureLaunchAuthorizationAsync(PluginPackageManifest manifest)
+        => RequestExternalAuthorizationAsync(manifest, trySavedCredentialFirst: true);
+
+    private async Task<ExternalAuthorizationPromptResult> RequestExternalAuthorizationAsync(
+        PluginPackageManifest manifest,
+        bool trySavedCredentialFirst)
     {
         if (!manifest.RequiresExternalAuthorization)
         {
-            return true;
+            return new ExternalAuthorizationPromptResult(true, string.Empty);
         }
         var target = ExternalModelAuthorizationService.HuggingFaceCredentialTarget;
         var savedToken = WindowsCredentialStore.Read(target) ?? string.Empty;
+        if (trySavedCredentialFirst && !string.IsNullOrWhiteSpace(savedToken))
+        {
+            SetRuntimePhase("正在验证 Hugging Face 权限", "Verifying Hugging Face access");
+            var savedResult = await _authorizationService.VerifyAsync(manifest, savedToken);
+            if (savedResult.IsAuthorized)
+            {
+                AppendLog(L("Hugging Face 身份与模型访问权限验证通过。", "Hugging Face identity and model access verified."));
+                return new ExternalAuthorizationPromptResult(true, savedToken.Trim());
+            }
+        }
         while (true)
         {
             using var dialog = new Form
@@ -2603,7 +2623,7 @@ internal sealed class LauncherForm : Form
             dialog.CancelButton = cancel;
             if (dialog.ShowDialog(this) != DialogResult.OK)
             {
-                return false;
+                return new ExternalAuthorizationPromptResult(false, string.Empty);
             }
             SetRuntimePhase("正在验证 Hugging Face 权限", "Verifying Hugging Face access");
             var result = await _authorizationService.VerifyAsync(manifest, token.Text);
@@ -2618,7 +2638,7 @@ internal sealed class LauncherForm : Form
                     WindowsCredentialStore.Delete(target);
                 }
                 AppendLog(L("Hugging Face 身份与模型访问权限验证通过。", "Hugging Face identity and model access verified."));
-                return true;
+                return new ExternalAuthorizationPromptResult(true, token.Text.Trim());
             }
             MessageBox.Show(result.Message, L("授权验证失败", "Authorization verification failed"), MessageBoxButtons.OK, MessageBoxIcon.Warning);
             savedToken = token.Text;
@@ -4419,6 +4439,7 @@ internal sealed class LauncherForm : Form
     {
         SetServiceRuntimeState(profile, ServiceRuntimeState.Checking);
         SetRuntimePhase("正在检查启动环境", $"Checking {profile.Name}");
+        var launchHuggingFaceToken = string.Empty;
         var definition = _modelCatalog.Models.FirstOrDefault(model =>
             Path.GetFullPath(model.RootDirectory).Equals(Path.GetFullPath(profile.WorkingDirectory), StringComparison.OrdinalIgnoreCase));
         if (definition is not null)
@@ -4488,6 +4509,22 @@ internal sealed class LauncherForm : Form
                     ShowActionableError(L("Stable Audio 3 环境未就绪", "Stable Audio 3 environment is not ready"), ex.Message, profile);
                     return;
                 }
+            }
+
+            var authorizationManifest = KnownRepositoryAuthorizationService.CreateLaunchManifest(
+                definition.GitHubRepository,
+                profile.Arguments,
+                profile.Name);
+            if (authorizationManifest is not null)
+            {
+                var authorization = await EnsureLaunchAuthorizationAsync(authorizationManifest);
+                if (!authorization.IsAuthorized)
+                {
+                    SetServiceRuntimeState(profile, ServiceRuntimeState.Ready);
+                    SetRuntimePhase("Hugging Face 授权尚未完成", $"Hugging Face authorization was not completed for {profile.Name}");
+                    return;
+                }
+                launchHuggingFaceToken = authorization.Token;
             }
         }
         var missing = GetMissingRequirements(profile);
@@ -4584,6 +4621,7 @@ internal sealed class LauncherForm : Form
                 {
                     startInfo.Environment["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True";
                 }
+                KnownRepositoryAuthorizationService.ApplyCredential(startInfo, launchHuggingFaceToken);
             }
 
             var process = new Process { StartInfo = startInfo, EnableRaisingEvents = true };

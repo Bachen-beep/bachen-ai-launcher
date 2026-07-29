@@ -372,6 +372,16 @@ internal static class LauncherSelfTests
             Assert(stableAudioAnalysis.LaunchOptions[0].Arguments == "run_gradio.py --model small-sfx" && stableAudioAnalysis.LaunchOptions[0].IsRecommended, "Stable Audio 3 analysis recommends a complete Small SFX launch command", lines);
             Assert(KnownRepositoryEnvironmentService.NormalizeLaunchArguments("Stability-AI/stable-audio-3", "run_gradio.py") == "run_gradio.py --model small-sfx", "Existing Stable Audio 3 imports receive the missing model argument", lines);
             Assert(KnownRepositoryEnvironmentService.NormalizeLaunchArguments("Stability-AI/stable-audio-3", "run_gradio.py --model small-sfx --port 7861") == "run_gradio.py --model small-sfx", "Stable Audio 3 removes the unsupported port command-line argument", lines);
+            var smallSfxAuthorization = KnownRepositoryAuthorizationService.CreateLaunchManifest("Stability-AI/stable-audio-3", "run_gradio.py --model small-sfx", "Stable Audio 3");
+            var smallMusicAuthorization = KnownRepositoryAuthorizationService.CreateLaunchManifest("Stability-AI/stable-audio-3", "run_gradio.py --model=small-music", "Stable Audio 3");
+            var mediumAuthorization = KnownRepositoryAuthorizationService.CreateLaunchManifest("Stability-AI/stable-audio-3", "run_gradio.py --model medium", "Stable Audio 3");
+            Assert(smallSfxAuthorization?.ModelId == "stabilityai/stable-audio-3-small-sfx", "Stable Audio Small SFX launch checks the matching gated repository", lines);
+            Assert(smallMusicAuthorization?.ModelId == "stabilityai/stable-audio-3-small-music", "Stable Audio Small Music launch checks the matching gated repository", lines);
+            Assert(mediumAuthorization?.ModelId == "stabilityai/stable-audio-3-medium" && mediumAuthorization.AuthorizationProbePath == "model_config.json", "Stable Audio Medium launch checks protected model access", lines);
+            Assert(KnownRepositoryAuthorizationService.CreateLaunchManifest("Stability-AI/stable-audio-3", "run_gradio.py --model unknown", "Stable Audio 3") is null, "Unknown Stable Audio model is not assigned unrelated credentials", lines);
+            var credentialStartInfo = new System.Diagnostics.ProcessStartInfo();
+            KnownRepositoryAuthorizationService.ApplyCredential(credentialStartInfo, "  self-test-token  ");
+            Assert(credentialStartInfo.Environment["HF_TOKEN"] == "self-test-token" && !credentialStartInfo.ArgumentList.Contains("self-test-token"), "Hugging Face credential is injected through the child environment only", lines);
             Assert(KnownRepositoryEnvironmentService.HasMissingEnvironment("Stability-AI/stable-audio-3", "run_gradio.py", analyzedStableAudioRoot), "Stable Audio 3 missing Gradio dependency is detected", lines);
             var gradioPackage = Path.Combine(analyzedStableAudioRoot, ".venv", "Lib", "site-packages", "gradio", "__init__.py");
             Directory.CreateDirectory(Path.GetDirectoryName(gradioPackage)!);
