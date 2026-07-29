@@ -18,9 +18,11 @@ internal static class PluginProcessService
 $roots = @({string.Join(",", roots)})
 Get-CimInstance Win32_Process | Where-Object {{
     $processCommandLine = $_.CommandLine
-    $processCommandLine -and ($roots | Where-Object {{
-        $processCommandLine.IndexOf($_, [System.StringComparison]::OrdinalIgnoreCase) -ge 0
-    }})
+    $processExecutable = $_.ExecutablePath
+    $roots | Where-Object {{
+        ($processCommandLine -and $processCommandLine.IndexOf($_, [System.StringComparison]::OrdinalIgnoreCase) -ge 0) -or
+        ($processExecutable -and $processExecutable.IndexOf($_, [System.StringComparison]::OrdinalIgnoreCase) -eq 0)
+    }}
 }} | Select-Object -ExpandProperty ProcessId
 ";
         return RunPowerShellForPids(script);
@@ -69,6 +71,10 @@ Get-CimInstance Win32_Process | Where-Object {{
             {
                 using var process = Process.GetProcessById(processId);
                 process.Kill(true);
+                if (!process.WaitForExit(5000))
+                {
+                    throw new TimeoutException($"Process {processId} did not exit within 5 seconds.");
+                }
                 stopped.Add(processId);
             }
             catch (ArgumentException)

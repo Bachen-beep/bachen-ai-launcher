@@ -2381,7 +2381,7 @@ internal sealed class LauncherForm : Form
         menu.Items.Add(new ToolStripSeparator());
         menu.Items.Add(L("安装签名插件包", "Install signed plugin"), null, async (_, _) => await ShowInstallPluginWizardAsync());
         menu.Items.Add(L("重新运行首次设置", "Run first-time setup again"), null, async (_, _) => await ShowFirstRunWizardAsync());
-        menu.Items.Add(L("卸载所选插件", "Uninstall selected plugin"), null, (_, _) => UninstallSelectedPlugin());
+        menu.Items.Add(L("卸载所选插件", "Uninstall selected plugin"), null, async (_, _) => await UninstallSelectedPluginAsync());
         menu.Items.Add(L("受信任发布者", "Trusted publishers"), null, (_, _) => ShowTrustedPublishersDialog());
         menu.Items.Add(L("删除 Hugging Face 登录凭据", "Delete Hugging Face credential"), null, (_, _) => DeleteHuggingFaceCredential());
         menu.Items.Add(new ToolStripSeparator());
@@ -2756,7 +2756,7 @@ internal sealed class LauncherForm : Form
         return dialog.ShowDialog(this) == DialogResult.OK && accepted.Checked;
     }
 
-    private void UninstallSelectedPlugin()
+    private async Task UninstallSelectedPluginAsync()
     {
         var definition = _modelCatalog.Models.FirstOrDefault(model => model.Id.Equals(_selectedPluginId, StringComparison.OrdinalIgnoreCase));
         if (definition is null)
@@ -2772,11 +2772,31 @@ internal sealed class LauncherForm : Form
         }
         try
         {
+            var pluginProcesses = PluginProcessService.FindProcessesByPluginRoots([definition.RootDirectory]);
+            if (pluginProcesses.Count > 0)
+            {
+                AppendLog(L(
+                    $"卸载前正在停止插件残留进程：{string.Join(", ", pluginProcesses)}",
+                    $"Stopping remaining plugin processes before uninstall: {string.Join(", ", pluginProcesses)}"));
+                var stopped = PluginProcessService.Stop(pluginProcesses);
+                if (stopped.Failures.Count > 0)
+                {
+                    throw new InvalidOperationException(string.Join(Environment.NewLine, stopped.Failures.Select(failure => $"PID {failure.ProcessId}: {failure.Message}")));
+                }
+                await Task.Delay(500);
+                var remaining = PluginProcessService.FindProcessesByPluginRoots([definition.RootDirectory]);
+                if (remaining.Count > 0)
+                {
+                    throw new InvalidOperationException($"Plugin processes are still running: {string.Join(", ", remaining)}");
+                }
+            }
             if (_activeService is not null && _activeService.WorkingDirectory.Equals(definition.RootDirectory, StringComparison.OrdinalIgnoreCase))
             {
-                StopKnownServices();
+                _activeService = null;
+                _activeProcess = null;
+                _openButton.Enabled = false;
             }
-            var result = _pluginPackageService.Uninstall(definition, _settings.DataRoot);
+            var result = await _pluginPackageService.UninstallAsync(definition, _settings.DataRoot);
             if (result.BackupPath is not null)
             {
                 File.WriteAllText(Path.Combine(result.BackupPath, ".bachen-plugin-definition.json"), JsonSerializer.Serialize(definition, new JsonSerializerOptions { WriteIndented = true }), Encoding.UTF8);
@@ -3686,7 +3706,7 @@ internal sealed class LauncherForm : Form
         _detailUninstallButton = CreateActionButton(L("卸载插件", "Uninstall"), Color.FromArgb(96, 99, 108), 140);
         _detailUninstallButton.Location = new Point(350, 466);
         _detailUninstallButton.Height = 42;
-        _detailUninstallButton.Click += (_, _) => UninstallSelectedPlugin();
+        _detailUninstallButton.Click += async (_, _) => await UninstallSelectedPluginAsync();
         detailPanel.Controls.Add(_detailPrimaryButton);
         detailPanel.Controls.Add(stopButton);
         detailPanel.Controls.Add(_detailUninstallButton);
@@ -4866,14 +4886,23 @@ internal sealed class LauncherForm : Form
             .Where(entry => entry.ServiceName?.Equals(profile.Name, StringComparison.OrdinalIgnoreCase) == true && entry.IsError)
             .TakeLast(12)
             .Select(entry => $"[{entry.Timestamp:HH:mm:ss}] {entry.Message}");
+        var nativeCrash = exitCode == unchecked((int)0xC0000005)
+            ? L(
+                "检测到原生访问冲突 0xC0000005。通常来自 CUDA、PyTorch 原生扩展或显卡驱动，而不是普通 Python 异常。请关闭其他占用显存的程序、更新 NVIDIA 驱动，并优先测试 Small SFX；Medium 已自动启用半精度模式。",
+                "Native access violation 0xC0000005 detected. This usually comes from CUDA, a native PyTorch extension, or the GPU driver rather than a normal Python exception. Close other GPU applications, update the NVIDIA driver, and test Small SFX first; Medium automatically uses half precision.")
+            : string.Empty;
+        var formattedExitCode = exitCode < 0
+            ? $"{exitCode} (0x{unchecked((uint)exitCode):X8})"
+            : exitCode.ToString();
         return string.Join(Environment.NewLine,
             [
                 L($"插件 {profile.Name} 启动后立即退出。", $"{profile.Name} exited before its WebUI became ready."),
-                $"Exit code: {exitCode}",
+                $"Exit code: {formattedExitCode}",
                 $"Executable: {profile.Executable}",
                 $"Arguments: {profile.Arguments}",
                 $"Working directory: {profile.WorkingDirectory}",
                 $"Port: {profile.Port}",
+                .. (string.IsNullOrWhiteSpace(nativeCrash) ? [] : new[] { "", nativeCrash }),
                 "",
                 L("最近错误：", "Recent errors:"),
                 .. recentErrors

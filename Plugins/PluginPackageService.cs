@@ -130,7 +130,10 @@ internal sealed class PluginPackageService(HttpClient httpClient)
         }
     }
 
-    public PluginUninstallResult Uninstall(LauncherModelDefinition definition, string dataRoot)
+    public async Task<PluginUninstallResult> UninstallAsync(
+        LauncherModelDefinition definition,
+        string dataRoot,
+        CancellationToken cancellationToken = default)
     {
         var root = Path.GetFullPath(definition.RootDirectory);
         var managedRoot = Path.GetFullPath(Path.Combine(dataRoot, "plugins")) + Path.DirectorySeparatorChar;
@@ -141,8 +144,38 @@ internal sealed class PluginPackageService(HttpClient httpClient)
         var backupRoot = Path.Combine(dataRoot, "backups", "uninstalled-plugins");
         Directory.CreateDirectory(backupRoot);
         var backupPath = Path.Combine(backupRoot, $"{SanitizeId(definition.Id)}-{DateTime.Now:yyyyMMdd-HHmmss}");
-        Directory.Move(root, backupPath);
+        await MoveDirectoryWithRetryAsync(root, backupPath, cancellationToken: cancellationToken);
         return new PluginUninstallResult(true, backupPath);
+    }
+
+    internal static async Task MoveDirectoryWithRetryAsync(
+        string source,
+        string destination,
+        Action<string, string>? moveDirectory = null,
+        int retryDelayMilliseconds = 300,
+        CancellationToken cancellationToken = default)
+    {
+        Exception? lastError = null;
+        for (var attempt = 1; attempt <= 8; attempt++)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            try
+            {
+                (moveDirectory ?? Directory.Move)(source, destination);
+                return;
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                lastError = ex;
+                if (attempt < 8)
+                {
+                    await Task.Delay(retryDelayMilliseconds, cancellationToken);
+                }
+            }
+        }
+        throw new IOException(
+            $"The plugin directory is still in use after waiting for processes to exit. Close terminals, Explorer windows, editors, and security scans using '{source}', then retry uninstall.",
+            lastError);
     }
 
     private static void ValidateManifest(PluginPackageManifest manifest)

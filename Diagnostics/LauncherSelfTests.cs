@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.IO.Compression;
 using System.Security.Cryptography;
 using System.Text;
@@ -423,6 +424,7 @@ internal static class LauncherSelfTests
             Assert(stableAudioAnalysis.LaunchOptions[0].Arguments == "run_gradio.py --model small-sfx" && stableAudioAnalysis.LaunchOptions[0].IsRecommended, "Stable Audio 3 analysis recommends a complete Small SFX launch command", lines);
             Assert(KnownRepositoryEnvironmentService.NormalizeLaunchArguments("Stability-AI/stable-audio-3", "run_gradio.py") == "run_gradio.py --model small-sfx", "Existing Stable Audio 3 imports receive the missing model argument", lines);
             Assert(KnownRepositoryEnvironmentService.NormalizeLaunchArguments("Stability-AI/stable-audio-3", "run_gradio.py --model small-sfx --port 7861") == "run_gradio.py --model small-sfx", "Stable Audio 3 removes the unsupported port command-line argument", lines);
+            Assert(KnownRepositoryEnvironmentService.NormalizeLaunchArguments("Stability-AI/stable-audio-3", "run_gradio.py --model medium") == "run_gradio.py --model medium --model-half", "Existing Stable Audio Medium profile enables half precision", lines);
             var stableAudioProfileArguments = new[] { "small-sfx", "small-music", "medium" }
                 .Select(KnownRepositoryEnvironmentService.BuildStableAudioLaunchArguments)
                 .ToArray();
@@ -430,7 +432,7 @@ internal static class LauncherSelfTests
             {
                 "run_gradio.py --model small-sfx",
                 "run_gradio.py --model small-music",
-                "run_gradio.py --model medium"
+                "run_gradio.py --model medium --model-half"
             }) && stableAudioProfileArguments.All(arguments => !arguments.Contains("--port", StringComparison.OrdinalIgnoreCase)), "All Stable Audio launch profiles omit the unsupported port argument", lines);
             var smallSfxAuthorization = KnownRepositoryAuthorizationService.CreateLaunchManifest("Stability-AI/stable-audio-3", "run_gradio.py --model small-sfx", "Stable Audio 3");
             var smallMusicAuthorization = KnownRepositoryAuthorizationService.CreateLaunchManifest("Stability-AI/stable-audio-3", "run_gradio.py --model=small-music", "Stable Audio 3");
@@ -588,7 +590,41 @@ internal static class LauncherSelfTests
             Assert(File.ReadAllText(currentLauncherPath, Encoding.ASCII) == "next-version", "Atomic launcher replacement", lines);
             Assert(File.ReadAllText(launcherBackupPath, Encoding.ASCII) == "previous-version", "Launcher rollback backup preservation", lines);
 
-            var uninstall = packageService.Uninstall(install.Definition, dataRoot);
+            var moveAttempts = 0;
+            var retrySource = Path.Combine(testRoot, "retry-uninstall-source");
+            var retryDestination = Path.Combine(testRoot, "retry-uninstall-destination");
+            Directory.CreateDirectory(retrySource);
+            await PluginPackageService.MoveDirectoryWithRetryAsync(
+                retrySource,
+                retryDestination,
+                (source, destination) =>
+                {
+                    moveAttempts++;
+                    if (moveAttempts < 3) throw new IOException("simulated transient file lock");
+                    Directory.Move(source, destination);
+                },
+                retryDelayMilliseconds: 0);
+            Assert(moveAttempts == 3 && Directory.Exists(retryDestination), "Plugin uninstall retries transient directory locks", lines);
+
+            var processRoot = Path.Combine(testRoot, "process-owned-plugin");
+            Directory.CreateDirectory(processRoot);
+            var holdScript = Path.Combine(processRoot, "hold-open.cmd");
+            await File.WriteAllTextAsync(holdScript, "@ping 127.0.0.1 -n 30 > nul\r\n", Encoding.ASCII);
+            using (var heldProcess = Process.Start(new ProcessStartInfo("cmd.exe")
+            {
+                UseShellExecute = false,
+                CreateNoWindow = true,
+                ArgumentList = { "/c", holdScript }
+            }) ?? throw new InvalidOperationException("Unable to start process cleanup fixture."))
+            {
+                await Task.Delay(500);
+                var foundPluginProcesses = PluginProcessService.FindProcessesByPluginRoots([processRoot]);
+                Assert(foundPluginProcesses.Contains(heldProcess.Id), "Plugin uninstall discovers processes using the plugin directory", lines);
+                var stopResult = PluginProcessService.Stop(foundPluginProcesses);
+                Assert(stopResult.Failures.Count == 0 && heldProcess.WaitForExit(5000), "Plugin uninstall stops remaining process trees", lines);
+            }
+
+            var uninstall = await packageService.UninstallAsync(install.Definition, dataRoot);
             Assert(uninstall.FilesMoved && uninstall.BackupPath is not null && Directory.Exists(uninstall.BackupPath), "Recoverable plugin uninstall", lines);
 
             var settingsPath = Path.Combine(testRoot, "config", "launcher.settings.json");

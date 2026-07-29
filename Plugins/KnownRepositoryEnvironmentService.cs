@@ -19,9 +19,13 @@ internal static class KnownRepositoryEnvironmentService
         }
 
         var normalized = Regex.Replace(launchArguments, @"\s+--port\s+\S+", string.Empty, RegexOptions.IgnoreCase).Trim();
-        return normalized.Contains("--model", StringComparison.OrdinalIgnoreCase)
-            ? normalized
-            : normalized + " --model small-sfx";
+        if (!normalized.Contains("--model", StringComparison.OrdinalIgnoreCase))
+        {
+            normalized += " --model small-sfx";
+        }
+        return GetStableAudioModel(normalized) == "medium" && !normalized.Contains("--model-half", StringComparison.OrdinalIgnoreCase)
+            ? normalized + " --model-half"
+            : normalized;
     }
 
     public static string BuildStableAudioLaunchArguments(string model)
@@ -31,7 +35,9 @@ internal static class KnownRepositoryEnvironmentService
         {
             throw new ArgumentOutOfRangeException(nameof(model), model, "Unknown Stable Audio 3 model profile.");
         }
-        return $"run_gradio.py --model {model}";
+        return model == "medium"
+            ? "run_gradio.py --model medium --model-half"
+            : $"run_gradio.py --model {model}";
     }
 
     public static async Task EnsureEnvironmentAsync(
@@ -60,4 +66,10 @@ internal static class KnownRepositoryEnvironmentService
     private static bool IsStableAudioGradio(string repository, string launchArguments)
         => repository.Equals(StableAudioRepository, StringComparison.OrdinalIgnoreCase) &&
            launchArguments.Contains("run_gradio.py", StringComparison.OrdinalIgnoreCase);
+
+    private static string GetStableAudioModel(string launchArguments)
+    {
+        var match = Regex.Match(launchArguments, @"(?:^|\s)--model(?:\s+|=)(?<model>[^\s]+)", RegexOptions.IgnoreCase);
+        return match.Success ? match.Groups["model"].Value.Trim().ToLowerInvariant() : string.Empty;
+    }
 }
