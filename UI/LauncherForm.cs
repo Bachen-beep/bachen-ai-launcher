@@ -4423,6 +4423,14 @@ internal sealed class LauncherForm : Form
             Path.GetFullPath(model.RootDirectory).Equals(Path.GetFullPath(profile.WorkingDirectory), StringComparison.OrdinalIgnoreCase));
         if (definition is not null)
         {
+            var normalizedArguments = KnownRepositoryEnvironmentService.NormalizeLaunchArguments(definition.GitHubRepository, definition.Arguments);
+            if (!normalizedArguments.Equals(definition.Arguments, StringComparison.Ordinal))
+            {
+                definition.Arguments = normalizedArguments;
+                SaveModelCatalog(_modelCatalog);
+                profile = CreateCustomProfile(definition);
+            }
+
             var trust = InstalledPluginTrustValidator.Verify(definition, _trustedPublishers);
             if (!trust.IsTrusted)
             {
@@ -4453,6 +4461,31 @@ internal sealed class LauncherForm : Form
                     SetRuntimePhase("Woosh 模型权重补全失败", $"Woosh model asset repair failed for {profile.Name}");
                     AppendLog(L("Woosh 模型权重补全失败：", "Woosh model asset repair failed: ") + ex.Message, profile, true);
                     ShowActionableError(L("Woosh 权重未就绪", "Woosh model assets are not ready"), ex.Message, profile);
+                    return;
+                }
+            }
+
+            if (KnownRepositoryEnvironmentService.HasMissingEnvironment(definition.GitHubRepository, profile.Arguments, profile.WorkingDirectory))
+            {
+                try
+                {
+                    SetRuntimePhase("正在补全 Stable Audio 3 UI 环境", $"Installing Stable Audio 3 UI dependencies for {profile.Name}");
+                    var progress = new Progress<string>(message => AppendLog(message, profile));
+                    await KnownRepositoryEnvironmentService.EnsureEnvironmentAsync(
+                        definition.GitHubRepository,
+                        profile.Arguments,
+                        profile.WorkingDirectory,
+                        _settings.DataRoot,
+                        _githubClient,
+                        SystemResourceProbe.ReadPrimaryGpu() is not null,
+                        progress);
+                }
+                catch (Exception ex)
+                {
+                    SetServiceRuntimeState(profile, ServiceRuntimeState.Missing);
+                    SetRuntimePhase("Stable Audio 3 UI 环境补全失败", $"Stable Audio 3 environment repair failed for {profile.Name}");
+                    AppendLog(L("Stable Audio 3 UI 环境补全失败：", "Stable Audio 3 UI environment repair failed: ") + ex.Message, profile, true);
+                    ShowActionableError(L("Stable Audio 3 环境未就绪", "Stable Audio 3 environment is not ready"), ex.Message, profile);
                     return;
                 }
             }

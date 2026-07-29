@@ -53,7 +53,7 @@ internal static class GitHubRepositoryAnalyzer
             throw new InvalidOperationException("No supported Python project or launch entry was detected. This repository needs a custom plugin manifest.");
         }
 
-        var options = DetectLaunchOptions(repositoryRoot);
+        var options = ApplyKnownRepositoryLaunchOptions(normalizedRepository, DetectLaunchOptions(repositoryRoot));
         if (options.Length == 0)
         {
             throw new InvalidOperationException("No safe launch entry could be detected. Review the repository README or use a signed plugin manifest.");
@@ -63,7 +63,7 @@ internal static class GitHubRepositoryAnalyzer
         var category = DetectCategory(combinedText);
         var usesUv = File.Exists(Path.Combine(repositoryRoot, "uv.lock")) || pyproject.Contains("[tool.uv]", StringComparison.OrdinalIgnoreCase) || Regex.IsMatch(readme, @"\buv\s+sync\b", RegexOptions.IgnoreCase);
         var environmentArguments = usesUv
-            ? BuildUvArguments(pyproject, readme, hasNvidiaGpu)
+            ? BuildUvArguments(pyproject, readme, hasNvidiaGpu, options.Any(option => option.EntryScript.Contains("gradio", StringComparison.OrdinalIgnoreCase)))
             : pyproject.Length > 0
                 ? ["-m", "pip", "install", "--disable-pip-version-check", "-e", "."]
                 : [];
@@ -128,11 +128,36 @@ internal static class GitHubRepositoryAnalyzer
         }).ToArray();
     }
 
-    private static string[] BuildUvArguments(string pyproject, string readme, bool hasNvidiaGpu)
+    private static string[] BuildUvArguments(string pyproject, string readme, bool hasNvidiaGpu, bool requiresUi)
     {
+        var arguments = new List<string> { "sync" };
         var profile = hasNvidiaGpu ? "cuda" : "cpu";
         var supportsProfile = Regex.IsMatch(pyproject, $@"\b{profile}\s*=", RegexOptions.IgnoreCase) || Regex.IsMatch(readme, $@"uv\s+sync[^\r\n]*--extra\s+{profile}\b", RegexOptions.IgnoreCase);
-        return supportsProfile ? ["sync", "--extra", profile] : ["sync"];
+        if (supportsProfile)
+        {
+            arguments.AddRange(["--extra", profile]);
+        }
+        if (requiresUi && Regex.IsMatch(pyproject, @"(?m)^\s*ui\s*=\s*\[", RegexOptions.IgnoreCase))
+        {
+            arguments.AddRange(["--extra", "ui"]);
+        }
+        return arguments.ToArray();
+    }
+
+    private static RepositoryLaunchOption[] ApplyKnownRepositoryLaunchOptions(string repository, RepositoryLaunchOption[] detected)
+    {
+        if (!repository.Equals("Stability-AI/stable-audio-3", StringComparison.OrdinalIgnoreCase) ||
+            !detected.Any(option => option.EntryScript.Equals("run_gradio.py", StringComparison.OrdinalIgnoreCase)))
+        {
+            return detected;
+        }
+
+        return
+        [
+            new RepositoryLaunchOption("Small SFX", "run_gradio.py", "run_gradio.py --model small-sfx --port {port}", true),
+            new RepositoryLaunchOption("Small Music", "run_gradio.py", "run_gradio.py --model small-music --port {port}"),
+            new RepositoryLaunchOption("Medium", "run_gradio.py", "run_gradio.py --model medium --port {port}")
+        ];
     }
 
     private static string FindRequirementsFile(string root)

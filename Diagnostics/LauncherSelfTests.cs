@@ -352,6 +352,22 @@ internal static class LauncherSelfTests
             var managedUvArguments = PythonEnvironmentService.BuildUvSyncArguments(wooshAnalysis.EnvironmentArguments, @"C:\managed-python\python.exe");
             Assert(managedUvArguments.Contains("--python") && managedUvArguments.Contains(@"C:\managed-python\python.exe") && !managedUvArguments.Contains("--active"), "External uv sync pins managed Python without self-hosted environment", lines);
 
+            var analyzedStableAudioRoot = Path.Combine(testRoot, "analyzed-stable-audio");
+            Directory.CreateDirectory(analyzedStableAudioRoot);
+            await File.WriteAllTextAsync(Path.Combine(analyzedStableAudioRoot, "README.md"), "# Stable Audio 3\n\nAudio generation with a Gradio UI.\n", Encoding.UTF8);
+            await File.WriteAllTextAsync(Path.Combine(analyzedStableAudioRoot, "pyproject.toml"), "[project]\nname = \"stable-audio-3\"\ndescription = \"Audio generation\"\nrequires-python = \">=3.10\"\ndependencies = [\"torch==2.7.1\"]\n[project.optional-dependencies]\nui = [\"gradio==6.3.0\"]\n[tool.uv]\n", Encoding.UTF8);
+            await File.WriteAllTextAsync(Path.Combine(analyzedStableAudioRoot, "uv.lock"), string.Empty, Encoding.UTF8);
+            await File.WriteAllTextAsync(Path.Combine(analyzedStableAudioRoot, "run_gradio.py"), "import gradio\n# --model --port\n", Encoding.UTF8);
+            var stableAudioAnalysis = GitHubRepositoryAnalyzer.Analyze("Stability-AI/stable-audio-3", analyzedStableAudioRoot, true);
+            Assert(stableAudioAnalysis.EnvironmentArguments.Contains("ui") && stableAudioAnalysis.LaunchOptions.Length == 3, "Stable Audio 3 analysis installs the Gradio UI extra and offers three model profiles", lines);
+            Assert(stableAudioAnalysis.LaunchOptions[0].Arguments == "run_gradio.py --model small-sfx --port {port}" && stableAudioAnalysis.LaunchOptions[0].IsRecommended, "Stable Audio 3 analysis recommends a complete Small SFX launch command", lines);
+            Assert(KnownRepositoryEnvironmentService.NormalizeLaunchArguments("Stability-AI/stable-audio-3", "run_gradio.py") == "run_gradio.py --model small-sfx --port {port}", "Existing Stable Audio 3 imports receive the missing model and port arguments", lines);
+            Assert(KnownRepositoryEnvironmentService.HasMissingEnvironment("Stability-AI/stable-audio-3", "run_gradio.py", analyzedStableAudioRoot), "Stable Audio 3 missing Gradio dependency is detected", lines);
+            var gradioPackage = Path.Combine(analyzedStableAudioRoot, ".venv", "Lib", "site-packages", "gradio", "__init__.py");
+            Directory.CreateDirectory(Path.GetDirectoryName(gradioPackage)!);
+            await File.WriteAllTextAsync(gradioPackage, string.Empty, Encoding.UTF8);
+            Assert(!KnownRepositoryEnvironmentService.HasMissingEnvironment("Stability-AI/stable-audio-3", "run_gradio.py", analyzedStableAudioRoot), "Stable Audio 3 installed Gradio dependency is accepted", lines);
+
             var analyzedGenericRoot = Path.Combine(testRoot, "analyzed-generic");
             Directory.CreateDirectory(analyzedGenericRoot);
             await File.WriteAllTextAsync(Path.Combine(analyzedGenericRoot, "requirements.txt"), "gradio\n", Encoding.UTF8);
