@@ -296,6 +296,10 @@ internal static class LauncherSelfTests
             var parsedGpus = SystemResourceProbe.ParseGpuOutput("0, NVIDIA GeForce RTX 4060, 512, 8188\r\n1, NVIDIA GeForce RTX 4090, 1024, 24564\r\n");
             Assert(parsedGpus.Count == 2 && parsedGpus.OrderByDescending(gpu => gpu.TotalMiB).First().Name == "NVIDIA GeForce RTX 4090", "Actual multi-GPU model parsing and primary selection", lines);
             Assert(SystemResourceProbe.FormatGpuUsageGiB(1024, 8188) == "1.00 / 8.00 GiB", "GPU MiB to GiB display formatting", lines);
+            var downwardLogBounds = LauncherForm.CalculateDownwardLogBounds(new Rectangle(100, 100, 1200, 800), 210, 72, new Rectangle(0, 0, 1920, 1080));
+            Assert(downwardLogBounds.Top == 100 && downwardLogBounds.Height == 938, "Runtime log expands the window downward", lines);
+            var edgeAdjustedLogBounds = LauncherForm.CalculateDownwardLogBounds(new Rectangle(100, 200, 1200, 800), 210, 72, new Rectangle(0, 0, 1920, 1080));
+            Assert(edgeAdjustedLogBounds.Top == 142 && edgeAdjustedLogBounds.Bottom == 1080, "Downward runtime log remains inside the working area", lines);
 
             var gitHubSourceRoot = Path.Combine(testRoot, "github-source");
             Directory.CreateDirectory(gitHubSourceRoot);

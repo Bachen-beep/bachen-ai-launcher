@@ -839,6 +839,8 @@ internal sealed class LauncherForm : Form
     private List<PluginUiEntry> _pluginEntries = [];
     private string _selectedPluginId = "woosh-dflow";
     private bool _logExpanded;
+    private Rectangle? _logCollapsedWindowBounds;
+    private bool _logExpandsWindowDownward;
     private ServiceProfile? _activeService;
     private Process? _activeProcess;
     private bool _useEnglish;
@@ -3917,6 +3919,11 @@ internal sealed class LauncherForm : Form
 
     private void ToggleLogDrawer()
     {
+        if (!_logExpanded)
+        {
+            _logExpandsWindowDownward = WindowState == FormWindowState.Normal;
+            _logCollapsedWindowBounds = _logExpandsWindowDownward ? Bounds : null;
+        }
         _logExpanded = !_logExpanded;
         if (_logToggleButton is not null)
         {
@@ -3944,15 +3951,48 @@ internal sealed class LauncherForm : Form
             _logAnimationTimer.Stop();
             return;
         }
-        var target = _logExpanded ? 210 : 72;
+        const int collapsedHeight = 72;
+        const int expandedHeight = 210;
+        var target = _logExpanded ? expandedHeight : collapsedHeight;
         var difference = target - _logHost.Height;
         if (Math.Abs(difference) <= 8)
         {
             _logHost.Height = target;
+            ApplyDownwardLogWindowBounds(target, collapsedHeight);
+            if (!_logExpanded)
+            {
+                _logCollapsedWindowBounds = null;
+                _logExpandsWindowDownward = false;
+            }
             _logAnimationTimer.Stop();
             return;
         }
-        _logHost.Height += Math.Sign(difference) * Math.Max(8, Math.Abs(difference) / 4);
+        var nextHeight = _logHost.Height + Math.Sign(difference) * Math.Max(8, Math.Abs(difference) / 4);
+        _logHost.Height = Math.Clamp(nextHeight, Math.Min(_logHost.Height, target), Math.Max(_logHost.Height, target));
+        ApplyDownwardLogWindowBounds(_logHost.Height, collapsedHeight);
+    }
+
+    private void ApplyDownwardLogWindowBounds(int logHeight, int collapsedLogHeight)
+    {
+        if (!_logExpandsWindowDownward || _logCollapsedWindowBounds is not { } collapsedBounds || WindowState != FormWindowState.Normal)
+        {
+            return;
+        }
+        Bounds = CalculateDownwardLogBounds(collapsedBounds, logHeight, collapsedLogHeight, Screen.FromRectangle(collapsedBounds).WorkingArea);
+    }
+
+    internal static Rectangle CalculateDownwardLogBounds(Rectangle collapsedBounds, int logHeight, int collapsedLogHeight, Rectangle workingArea)
+    {
+        var extraHeight = Math.Max(0, logHeight - collapsedLogHeight);
+        var height = Math.Min(workingArea.Height, collapsedBounds.Height + extraHeight);
+        var top = collapsedBounds.Top;
+        var overflow = top + height - workingArea.Bottom;
+        if (overflow > 0)
+        {
+            top -= overflow;
+        }
+        top = Math.Max(workingArea.Top, top);
+        return new Rectangle(collapsedBounds.Left, top, collapsedBounds.Width, height);
     }
 
     private void InitializeLegacyUi()
