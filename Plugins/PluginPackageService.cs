@@ -248,6 +248,11 @@ internal sealed class PluginPackageService(HttpClient httpClient)
             {
                 throw new InvalidDataException("Schema v6 Python plugins must declare managedRuntimeId.");
             }
+            if (manifest.CreateVirtualEnvironment &&
+                !ManagedPythonRuntimeService.Supported.Any(runtime => runtime.Id.Equals(manifest.ManagedRuntimeId, StringComparison.OrdinalIgnoreCase)))
+            {
+                throw new InvalidDataException($"Unsupported managedRuntimeId: {manifest.ManagedRuntimeId}");
+            }
             foreach (var asset in manifest.AssetPackages ?? [])
             {
                 if (string.IsNullOrWhiteSpace(asset.Id) ||

@@ -293,10 +293,19 @@ internal static class LauncherSelfTests
                 var preflight = PluginInstallPreflightService.Assess(versionSixManifest, versionSixDataRoot, () => (0, 8192));
                 Assert(preflight.RequiredDiskBytes >= (versionSixManifest.PackageSizeBytes + assetBytes.Length) * 2, "Asset packages included in disk preflight", lines);
             }
-            Assert(ManagedPythonRuntimeService.Python312.Id == "python-3.12.10-x64" &&
+            Assert(ManagedPythonRuntimeService.Python311.Id == "python-3.11.9-x64" &&
+                ManagedPythonRuntimeService.Python311.SizeBytes == 26216840 &&
+                ManagedPythonRuntimeService.Python311.Sha256 == "5EE42C4EEE1E6B4464BB23722F90B45303F79442DF63083F05322F1785F5FDDE" &&
+                ManagedPythonRuntimeService.Python312.Id == "python-3.12.10-x64" &&
                 ManagedPythonRuntimeService.Python312.SizeBytes == 26964224 &&
                 ManagedPythonRuntimeService.Python312.Sha256 == "67B5635E80EA51072B87941312D00EC8927C4DB9BA18938F7AD2D27B328B95FB",
-                "Managed Python runtime is pinned by version size and SHA-256", lines);
+                "Managed Python runtimes are pinned by version size and SHA-256", lines);
+            Assert(ManagedPythonRuntimeService.SelectForConstraint(">=3.10,<3.12") == ManagedPythonRuntimeService.Python311, "Python 3.11 selected for upper-bounded repository", lines);
+            Assert(ManagedPythonRuntimeService.SelectForConstraint(">=3.12") == ManagedPythonRuntimeService.Python312, "Python 3.12 selected for modern repository", lines);
+            Assert(ManagedPythonRuntimeService.SatisfiesConstraint(new Version(3, 11, 9), ">=3.10,<3.12") &&
+                !ManagedPythonRuntimeService.SatisfiesConstraint(new Version(3, 12, 10), ">=3.10,<3.12"),
+                "Python compound constraint evaluation", lines);
+            AssertThrows(() => ManagedPythonRuntimeService.SelectForConstraint(">=3.13"), "Unsupported Python constraint fails before environment creation", lines);
 
             using var client = new HttpClient();
             var packageService = new PluginPackageService(client);
@@ -405,10 +414,11 @@ internal static class LauncherSelfTests
             var analyzedStableAudioRoot = Path.Combine(testRoot, "analyzed-stable-audio");
             Directory.CreateDirectory(analyzedStableAudioRoot);
             await File.WriteAllTextAsync(Path.Combine(analyzedStableAudioRoot, "README.md"), "# Stable Audio 3\n\nAudio generation with a Gradio UI.\n", Encoding.UTF8);
-            await File.WriteAllTextAsync(Path.Combine(analyzedStableAudioRoot, "pyproject.toml"), "[project]\nname = \"stable-audio-3\"\ndescription = \"Audio generation\"\nrequires-python = \">=3.10\"\ndependencies = [\"torch==2.7.1\"]\n[project.optional-dependencies]\nui = [\"gradio==6.3.0\"]\n[tool.uv]\n", Encoding.UTF8);
+            await File.WriteAllTextAsync(Path.Combine(analyzedStableAudioRoot, "pyproject.toml"), "[project]\nname = \"stable-audio-3\"\ndescription = \"Audio generation\"\nrequires-python = \">=3.10,<3.12\"\ndependencies = [\"torch==2.7.1\"]\n[project.optional-dependencies]\nui = [\"gradio==6.3.0\"]\n[tool.uv]\n", Encoding.UTF8);
             await File.WriteAllTextAsync(Path.Combine(analyzedStableAudioRoot, "uv.lock"), string.Empty, Encoding.UTF8);
             await File.WriteAllTextAsync(Path.Combine(analyzedStableAudioRoot, "run_gradio.py"), "import gradio\n# --model --port\n", Encoding.UTF8);
             var stableAudioAnalysis = GitHubRepositoryAnalyzer.Analyze("Stability-AI/stable-audio-3", analyzedStableAudioRoot, true);
+            Assert(stableAudioAnalysis.RuntimeVersion == ">=3.10,<3.12" && ManagedPythonRuntimeService.SelectForConstraint(stableAudioAnalysis.RuntimeVersion) == ManagedPythonRuntimeService.Python311, "Stable Audio selects managed Python 3.11", lines);
             Assert(stableAudioAnalysis.EnvironmentArguments.Contains("ui") && stableAudioAnalysis.LaunchOptions.Length == 3, "Stable Audio 3 analysis installs the Gradio UI extra and offers three model profiles", lines);
             Assert(stableAudioAnalysis.LaunchOptions[0].Arguments == "run_gradio.py --model small-sfx" && stableAudioAnalysis.LaunchOptions[0].IsRecommended, "Stable Audio 3 analysis recommends a complete Small SFX launch command", lines);
             Assert(KnownRepositoryEnvironmentService.NormalizeLaunchArguments("Stability-AI/stable-audio-3", "run_gradio.py") == "run_gradio.py --model small-sfx", "Existing Stable Audio 3 imports receive the missing model argument", lines);
@@ -444,7 +454,12 @@ internal static class LauncherSelfTests
             var gradioPackage = Path.Combine(analyzedStableAudioRoot, ".venv", "Lib", "site-packages", "gradio", "__init__.py");
             Directory.CreateDirectory(Path.GetDirectoryName(gradioPackage)!);
             await File.WriteAllTextAsync(gradioPackage, string.Empty, Encoding.UTF8);
+            var stablePyvenv = Path.Combine(analyzedStableAudioRoot, ".venv", "pyvenv.cfg");
+            await File.WriteAllTextAsync(stablePyvenv, "version = 3.12.10\n", Encoding.UTF8);
+            Assert(KnownRepositoryEnvironmentService.HasMissingEnvironment("Stability-AI/stable-audio-3", "run_gradio.py", analyzedStableAudioRoot), "Stable Audio incompatible Python environment is detected", lines);
+            await File.WriteAllTextAsync(stablePyvenv, "version_info = 3.11.9\n", Encoding.UTF8);
             Assert(!KnownRepositoryEnvironmentService.HasMissingEnvironment("Stability-AI/stable-audio-3", "run_gradio.py", analyzedStableAudioRoot), "Stable Audio 3 installed Gradio dependency is accepted", lines);
+            Assert(PluginDependencyChecker.Check(["python>=3.10,<3.12"], analyzedStableAudioRoot).Single().IsSatisfied, "Python dependency check validates compound environment constraint", lines);
 
             var importedUpdateRoot = Path.Combine(testRoot, "imported-update-baseline");
             Directory.CreateDirectory(importedUpdateRoot);

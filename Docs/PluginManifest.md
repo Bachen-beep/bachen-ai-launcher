@@ -36,7 +36,7 @@ BaChen AI Launcher 支持两种可信安装来源：经过发布者 RSA 公钥�
 - `modelProvider`, `modelId`: 当前支持 `huggingface` 和对应模型 ID。
 - `authorizationUrl`: 用户自行注册、登录和接受条款的官方 HTTPS 页面。
 - `authorizationProbePath`: 用于验证实际模型读取权限的小文件路径。
-- `managedRuntimeId`: 由启动器管理的固定运行时 ID。当前支持 `python-3.12.10-x64`。
+- `managedRuntimeId`: 由启动器管理的固定运行时 ID。当前支持 `python-3.11.9-x64` 和 `python-3.12.10-x64`；GitHub 仓库自动导入会依据 `project.requires-python` 选择最高兼容版本。
 - `pythonInstallArguments`: 在插件虚拟环境中执行的参数数组，例如 `-m pip install -e .`。
 - `assetPackages`: 模型或其他大文件包列表；每项声明稳定 ID、HTTPS 主地址、镜像、SHA-256、精确大小与安全目标目录。
 

@@ -3240,14 +3240,19 @@ internal sealed class LauncherForm : Form
                     var requirementsRelative = requirementsFile.Text.Trim().Replace('\\', '/');
                     var hasRequirements = !string.IsNullOrWhiteSpace(requirementsRelative) && File.Exists(Path.Combine(imported.RootDirectory, requirementsRelative.Replace('/', Path.DirectorySeparatorChar)));
                     var hasPyProject = File.Exists(Path.Combine(imported.RootDirectory, "pyproject.toml"));
+                    var runtimeConstraint = GitHubRepositoryAnalyzer.ReadPythonConstraint(imported.RootDirectory);
+                    var selectedRuntime = ManagedPythonRuntimeService.SelectForConstraint(runtimeConstraint);
+                    ((IProgress<string>)importProgress).Report(L(
+                        $"项目要求 Python {runtimeConstraint}；已选择托管 Python {selectedRuntime.Version}",
+                        $"Project requires Python {runtimeConstraint}; selected managed Python {selectedRuntime.Version}"));
                     var environmentManifest = new PluginPackageManifest
                     {
                         Runtime = "python",
-                        RuntimeVersion = ">=3.12",
+                        RuntimeVersion = runtimeConstraint,
                         CreateVirtualEnvironment = true,
                         VirtualEnvironmentPath = ".venv",
                         RequirementsFile = hasRequirements ? requirementsRelative : string.Empty,
-                        ManagedRuntimeId = ManagedPythonRuntimeService.Python312.Id,
+                        ManagedRuntimeId = selectedRuntime.Id,
                         PythonInstallArguments = hasPyProject ? ["-m", "pip", "install", "--disable-pip-version-check", "-e", "."] : []
                     };
                     await PythonEnvironmentService.EnsureAsync(environmentManifest, imported.RootDirectory, _settings.DataRoot, _githubClient, importProgress);
@@ -3256,7 +3261,7 @@ internal sealed class LauncherForm : Form
                 var declaredDependencies = dependencies.Text.Split(';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).ToList();
                 if (setupPython.Checked && !declaredDependencies.Any(item => item.StartsWith("python", StringComparison.OrdinalIgnoreCase)))
                 {
-                    declaredDependencies.Insert(0, "python>=3.12");
+                    declaredDependencies.Insert(0, $"python{GitHubRepositoryAnalyzer.ReadPythonConstraint(imported.RootDirectory)}");
                 }
                 var definition = new LauncherModelDefinition
                 {
@@ -3268,7 +3273,7 @@ internal sealed class LauncherForm : Form
                     Executable = executableValue,
                     Arguments = argumentsValue,
                     Runtime = setupPython.Checked ? "python" : "custom",
-                    RuntimeVersion = setupPython.Checked ? ">=3.12" : string.Empty,
+                    RuntimeVersion = setupPython.Checked ? GitHubRepositoryAnalyzer.ReadPythonConstraint(imported.RootDirectory) : string.Empty,
                     Port = (int)port.Value,
                     RecommendedVramMiB = (int)(vram.Value * 1024M),
                     RecommendedSystemMemoryMiB = (int)(systemMemory.Value * 1024M),
@@ -4605,7 +4610,7 @@ internal sealed class LauncherForm : Form
             {
                 try
                 {
-                    SetRuntimePhase("正在补全 Stable Audio 3 UI 环境", $"Installing Stable Audio 3 UI dependencies for {profile.Name}");
+                    SetRuntimePhase("正在修复 Stable Audio 3 运行环境", $"Repairing the Stable Audio 3 environment for {profile.Name}");
                     var progress = new Progress<string>(message => AppendLog(message, profile));
                     await KnownRepositoryEnvironmentService.EnsureEnvironmentAsync(
                         definition.GitHubRepository,
@@ -4619,8 +4624,8 @@ internal sealed class LauncherForm : Form
                 catch (Exception ex)
                 {
                     SetServiceRuntimeState(profile, ServiceRuntimeState.Missing);
-                    SetRuntimePhase("Stable Audio 3 UI 环境补全失败", $"Stable Audio 3 environment repair failed for {profile.Name}");
-                    AppendLog(L("Stable Audio 3 UI 环境补全失败：", "Stable Audio 3 UI environment repair failed: ") + ex.Message, profile, true);
+                    SetRuntimePhase("Stable Audio 3 运行环境修复失败", $"Stable Audio 3 environment repair failed for {profile.Name}");
+                    AppendLog(L("Stable Audio 3 运行环境修复失败：", "Stable Audio 3 environment repair failed: ") + ex.Message, profile, true);
                     ShowActionableError(L("Stable Audio 3 环境未就绪", "Stable Audio 3 environment is not ready"), ex.Message, profile);
                     return;
                 }

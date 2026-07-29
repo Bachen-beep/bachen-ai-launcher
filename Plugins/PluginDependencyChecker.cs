@@ -41,7 +41,17 @@ internal static class PluginDependencyChecker
         if (requirement.StartsWith("python", StringComparison.OrdinalIgnoreCase))
         {
             var localPython = Path.Combine(pluginRoot, ".venv", "Scripts", "python.exe");
-            var path = File.Exists(localPython) ? localPython : FindCommand("python.exe") ?? FindCommand("python");
+            if (File.Exists(localPython))
+            {
+                var constraint = requirement["python".Length..].Trim();
+                var compatible = string.IsNullOrWhiteSpace(constraint) || PythonEnvironmentService.IsEnvironmentCompatible(pluginRoot, constraint);
+                return new DependencyCheckResult(
+                    requirement,
+                    compatible,
+                    true,
+                    compatible ? localPython : $"The local virtual environment does not satisfy Python {constraint}.");
+            }
+            var path = FindCommand("python.exe") ?? FindCommand("python");
             return new DependencyCheckResult(requirement, path is not null, true, path ?? "Python was not found in PATH.");
         }
         return new DependencyCheckResult(requirement, true, false, "Declared by the publisher; no automatic probe is defined.");

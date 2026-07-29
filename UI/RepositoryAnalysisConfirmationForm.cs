@@ -68,7 +68,14 @@ internal sealed class RepositoryAnalysisConfirmationForm : Form
         AddValue(table, 1, useEnglish ? "Branch / version" : "分支 / 版本", branch);
         AddValue(table, 2, useEnglish ? "Install directory" : "安装目录", installDirectory, true);
         AddValue(table, 3, useEnglish ? "Category" : "分类", analysis.Category);
-        AddValue(table, 4, useEnglish ? "Runtime" : "运行环境", $"{analysis.Runtime} {analysis.RuntimeVersion} / {analysis.EnvironmentManager}");
+        var managedRuntime = ManagedPythonRuntimeService.SelectForConstraint(analysis.RuntimeVersion);
+        AddValue(
+            table,
+            4,
+            useEnglish ? "Runtime" : "运行环境",
+            useEnglish
+                ? $"{analysis.Runtime} {analysis.RuntimeVersion} / managed {managedRuntime.Version} / {analysis.EnvironmentManager}"
+                : $"{analysis.Runtime} {analysis.RuntimeVersion} / 托管 {managedRuntime.Version} / {analysis.EnvironmentManager}");
         AddValue(table, 5, useEnglish ? "Executable" : "启动程序", analysis.Executable);
 
         AddLabel(table, 6, useEnglish ? "Launch option" : "启动入口");

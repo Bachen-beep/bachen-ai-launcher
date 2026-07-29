@@ -13,17 +13,30 @@ internal static class PythonEnvironmentService
         IProgress<string>? progress = null,
         CancellationToken cancellationToken = default)
     {
+        var runtime = ManagedPythonRuntimeService.SelectForConstraint(analysis.RuntimeVersion);
+        progress?.Report($"Project requires Python {analysis.RuntimeVersion}; selected managed Python {runtime.Version}");
         if (analysis.EnvironmentManager.Equals("uv", StringComparison.OrdinalIgnoreCase))
         {
             var managedPython = await new ManagedPythonRuntimeService(httpClient).EnsureAsync(
-                ManagedPythonRuntimeService.Python312.Id,
+                runtime.Id,
                 dataRoot,
                 progress,
                 cancellationToken: cancellationToken);
             var uvExecutable = await EnsureExternalUvAsync(managedPython, dataRoot, progress, cancellationToken);
-            progress?.Report("Synchronizing repository dependencies with external uv");
-            await RunAsync(uvExecutable, BuildUvSyncArguments(analysis.EnvironmentArguments, managedPython), pluginRoot, cancellationToken);
-            await ValidateVersionAsync(Path.Combine(pluginRoot, ".venv", "Scripts", "python.exe"), analysis.RuntimeVersion, pluginRoot, cancellationToken);
+            var environmentPath = Path.Combine(pluginRoot, ".venv");
+            var backupPath = await BackupIncompatibleEnvironmentAsync(environmentPath, analysis.RuntimeVersion, pluginRoot, progress, cancellationToken);
+            try
+            {
+                progress?.Report("Synchronizing repository dependencies with external uv");
+                await RunAsync(uvExecutable, BuildUvSyncArguments(analysis.EnvironmentArguments, managedPython), pluginRoot, cancellationToken);
+                await ValidateVersionAsync(Path.Combine(environmentPath, "Scripts", "python.exe"), analysis.RuntimeVersion, pluginRoot, cancellationToken);
+                TryDeleteDirectory(backupPath);
+            }
+            catch
+            {
+                RestoreEnvironmentBackup(environmentPath, backupPath);
+                throw;
+            }
             return;
         }
 
@@ -34,7 +47,7 @@ internal static class PythonEnvironmentService
             CreateVirtualEnvironment = true,
             VirtualEnvironmentPath = ".venv",
             RequirementsFile = analysis.RequirementsFile,
-            ManagedRuntimeId = ManagedPythonRuntimeService.Python312.Id,
+            ManagedRuntimeId = runtime.Id,
             PythonInstallArguments = analysis.EnvironmentManager.Equals("pip", StringComparison.OrdinalIgnoreCase) && File.Exists(Path.Combine(pluginRoot, "pyproject.toml"))
                 ? ["-m", "pip", "install", "--disable-pip-version-check", "-e", "."]
                 : []
@@ -82,32 +95,42 @@ internal static class PythonEnvironmentService
         }
         var environmentPath = ResolveSafePath(pluginRoot, manifest.VirtualEnvironmentPath, "virtualEnvironmentPath");
         var environmentPython = Path.Combine(environmentPath, "Scripts", "python.exe");
-        if (!File.Exists(environmentPython))
+        var backupPath = await BackupIncompatibleEnvironmentAsync(environmentPath, manifest.RuntimeVersion, pluginRoot, progress, cancellationToken);
+        try
         {
-            progress?.Report("Creating Python virtual environment");
-            var launcher = string.IsNullOrWhiteSpace(manifest.ManagedRuntimeId)
-                ? FindPythonLauncher()
-                : await new ManagedPythonRuntimeService(httpClient).EnsureAsync(manifest.ManagedRuntimeId, dataRoot, progress, downloadProgress, cancellationToken);
-            var arguments = launcher.EndsWith("py.exe", StringComparison.OrdinalIgnoreCase) && string.IsNullOrWhiteSpace(manifest.ManagedRuntimeId)
-                ? new[] { "-3", "-m", "venv", environmentPath }
-                : new[] { "-m", "venv", environmentPath };
-            await RunAsync(launcher, arguments, pluginRoot, cancellationToken);
-        }
-        await ValidateVersionAsync(environmentPython, manifest.RuntimeVersion, pluginRoot, cancellationToken);
-        if (!string.IsNullOrWhiteSpace(manifest.RequirementsFile))
-        {
-            var requirements = ResolveSafePath(pluginRoot, manifest.RequirementsFile, "requirementsFile");
-            if (!File.Exists(requirements))
+            if (!File.Exists(environmentPython))
             {
-                throw new FileNotFoundException("The manifest requirements file is missing.", requirements);
+                progress?.Report("Creating Python virtual environment");
+                var launcher = string.IsNullOrWhiteSpace(manifest.ManagedRuntimeId)
+                    ? FindPythonLauncher()
+                    : await new ManagedPythonRuntimeService(httpClient).EnsureAsync(manifest.ManagedRuntimeId, dataRoot, progress, downloadProgress, cancellationToken);
+                var arguments = launcher.EndsWith("py.exe", StringComparison.OrdinalIgnoreCase) && string.IsNullOrWhiteSpace(manifest.ManagedRuntimeId)
+                    ? new[] { "-3", "-m", "venv", environmentPath }
+                    : new[] { "-m", "venv", environmentPath };
+                await RunAsync(launcher, arguments, pluginRoot, cancellationToken);
             }
-            progress?.Report("Installing Python dependencies");
-            await RunAsync(environmentPython, ["-m", "pip", "install", "--disable-pip-version-check", "-r", requirements], pluginRoot, cancellationToken);
+            await ValidateVersionAsync(environmentPython, manifest.RuntimeVersion, pluginRoot, cancellationToken);
+            if (!string.IsNullOrWhiteSpace(manifest.RequirementsFile))
+            {
+                var requirements = ResolveSafePath(pluginRoot, manifest.RequirementsFile, "requirementsFile");
+                if (!File.Exists(requirements))
+                {
+                    throw new FileNotFoundException("The manifest requirements file is missing.", requirements);
+                }
+                progress?.Report("Installing Python dependencies");
+                await RunAsync(environmentPython, ["-m", "pip", "install", "--disable-pip-version-check", "-r", requirements], pluginRoot, cancellationToken);
+            }
+            if ((manifest.PythonInstallArguments ?? []).Length > 0)
+            {
+                progress?.Report("Installing the Python plugin package");
+                await RunAsync(environmentPython, manifest.PythonInstallArguments ?? [], pluginRoot, cancellationToken);
+            }
+            TryDeleteDirectory(backupPath);
         }
-        if ((manifest.PythonInstallArguments ?? []).Length > 0)
+        catch
         {
-            progress?.Report("Installing the Python plugin package");
-            await RunAsync(environmentPython, manifest.PythonInstallArguments ?? [], pluginRoot, cancellationToken);
+            RestoreEnvironmentBackup(environmentPath, backupPath);
+            throw;
         }
     }
 
@@ -150,6 +173,15 @@ internal static class PythonEnvironmentService
 
     private static async Task ValidateVersionAsync(string python, string constraint, string workingDirectory, CancellationToken cancellationToken)
     {
+        var actual = await ReadVersionAsync(python, workingDirectory, cancellationToken);
+        if (!ManagedPythonRuntimeService.SatisfiesConstraint(actual, constraint))
+        {
+            throw new InvalidOperationException($"Python {actual} does not satisfy runtimeVersion '{constraint}'.");
+        }
+    }
+
+    private static async Task<Version> ReadVersionAsync(string python, string workingDirectory, CancellationToken cancellationToken)
+    {
         var startInfo = new ProcessStartInfo(python, "--version")
         {
             WorkingDirectory = workingDirectory,
@@ -162,17 +194,88 @@ internal static class PythonEnvironmentService
         var output = await process.StandardOutput.ReadToEndAsync(cancellationToken) + await process.StandardError.ReadToEndAsync(cancellationToken);
         await process.WaitForExitAsync(cancellationToken);
         var actualMatch = Regex.Match(output, "\\d+\\.\\d+(?:\\.\\d+)?");
-        var requiredMatch = Regex.Match(constraint, "\\d+\\.\\d+(?:\\.\\d+)?");
-        if (!actualMatch.Success || !requiredMatch.Success)
+        if (!actualMatch.Success)
+        {
+            throw new InvalidOperationException($"Unable to determine the Python version from '{output.Trim()}'.");
+        }
+        return Version.Parse(actualMatch.Value);
+    }
+
+    private static async Task<string?> BackupIncompatibleEnvironmentAsync(
+        string environmentPath,
+        string constraint,
+        string workingDirectory,
+        IProgress<string>? progress,
+        CancellationToken cancellationToken)
+    {
+        var environmentPython = Path.Combine(environmentPath, "Scripts", "python.exe");
+        if (!File.Exists(environmentPython))
+        {
+            return null;
+        }
+        try
+        {
+            var version = await ReadVersionAsync(environmentPython, workingDirectory, cancellationToken);
+            if (ManagedPythonRuntimeService.SatisfiesConstraint(version, constraint))
+            {
+                return null;
+            }
+            progress?.Report($"Rebuilding incompatible Python {version} environment for requirement {constraint}");
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            progress?.Report("Rebuilding an unreadable Python virtual environment");
+        }
+        var backupPath = environmentPath + ".bachen-backup-" + Guid.NewGuid().ToString("N");
+        Directory.Move(environmentPath, backupPath);
+        return backupPath;
+    }
+
+    private static void RestoreEnvironmentBackup(string environmentPath, string? backupPath)
+    {
+        if (string.IsNullOrWhiteSpace(backupPath) || !Directory.Exists(backupPath))
         {
             return;
         }
-        var actual = Version.Parse(actualMatch.Value);
-        var required = Version.Parse(requiredMatch.Value);
-        var satisfied = constraint.TrimStart().StartsWith(">=", StringComparison.Ordinal) ? actual >= required : actual.Major == required.Major && actual.Minor == required.Minor;
-        if (!satisfied)
+        DeleteDirectoryIfPresent(environmentPath);
+        Directory.Move(backupPath, environmentPath);
+    }
+
+    private static void DeleteDirectoryIfPresent(string? path)
+    {
+        if (!string.IsNullOrWhiteSpace(path) && Directory.Exists(path))
         {
-            throw new InvalidOperationException($"Python {actual} does not satisfy runtimeVersion '{constraint}'.");
+            Directory.Delete(path, true);
+        }
+    }
+
+    private static void TryDeleteDirectory(string? path)
+    {
+        try
+        {
+            DeleteDirectoryIfPresent(path);
+        }
+        catch
+        {
+            // A completed environment must remain usable even if its obsolete backup is temporarily locked.
+        }
+    }
+
+    internal static bool IsEnvironmentCompatible(string pluginRoot, string constraint)
+    {
+        var configurationPath = Path.Combine(pluginRoot, ".venv", "pyvenv.cfg");
+        if (!File.Exists(configurationPath))
+        {
+            return false;
+        }
+        try
+        {
+            var match = Regex.Match(File.ReadAllText(configurationPath), @"(?mi)^\s*version(?:_info)?\s*=\s*(?<version>\d+\.\d+(?:\.\d+)?)\s*$");
+            return match.Success && ManagedPythonRuntimeService.SatisfiesConstraint(Version.Parse(match.Groups["version"].Value), constraint);
+        }
+        catch
+        {
+            return false;
         }
     }
 

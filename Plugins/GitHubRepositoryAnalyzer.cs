@@ -46,7 +46,7 @@ internal static class GitHubRepositoryAnalyzer
         var repositoryName = normalizedRepository.Split('/')[1];
         var projectName = ReadTomlString(pyproject, "name") ?? repositoryName;
         var description = ReadTomlString(pyproject, "description") ?? FirstReadmeParagraph(readme) ?? $"Local AI plugin imported from {normalizedRepository}.";
-        var runtimeVersion = NormalizePythonConstraint(ReadTomlString(pyproject, "requires-python"));
+        var runtimeVersion = ReadPythonConstraint(repositoryRoot);
         var isPython = File.Exists(pyprojectPath) || requirementsFile.Length > 0 || Directory.EnumerateFiles(repositoryRoot, "*.py", SearchOption.AllDirectories).Any();
         if (!isPython)
         {
@@ -175,6 +175,13 @@ internal static class GitHubRepositoryAnalyzer
 
     private static string NormalizePythonConstraint(string? constraint)
         => string.IsNullOrWhiteSpace(constraint) ? ">=3.10" : constraint.Trim();
+
+    internal static string ReadPythonConstraint(string repositoryRoot)
+    {
+        var pyprojectPath = Path.Combine(Path.GetFullPath(repositoryRoot), "pyproject.toml");
+        var pyproject = File.Exists(pyprojectPath) ? File.ReadAllText(pyprojectPath) : string.Empty;
+        return NormalizePythonConstraint(ReadTomlString(pyproject, "requires-python"));
+    }
 
     private static string DetectCategory(string text)
     {

@@ -8,7 +8,8 @@ internal static class KnownRepositoryEnvironmentService
 
     public static bool HasMissingEnvironment(string repository, string launchArguments, string rootDirectory)
         => IsStableAudioGradio(repository, launchArguments) &&
-           !File.Exists(Path.Combine(rootDirectory, ".venv", "Lib", "site-packages", "gradio", "__init__.py"));
+           (!File.Exists(Path.Combine(rootDirectory, ".venv", "Lib", "site-packages", "gradio", "__init__.py")) ||
+            !PythonEnvironmentService.IsEnvironmentCompatible(rootDirectory, GitHubRepositoryAnalyzer.ReadPythonConstraint(rootDirectory)));
 
     public static string NormalizeLaunchArguments(string repository, string launchArguments)
     {
