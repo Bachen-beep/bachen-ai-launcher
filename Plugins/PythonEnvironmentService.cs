@@ -5,6 +5,40 @@ namespace BaChenAiLauncher;
 
 internal static class PythonEnvironmentService
 {
+    public static async Task EnsureRepositoryAsync(
+        GitHubRepositoryAnalysis analysis,
+        string pluginRoot,
+        string dataRoot,
+        HttpClient httpClient,
+        IProgress<string>? progress = null,
+        CancellationToken cancellationToken = default)
+    {
+        var baseManifest = new PluginPackageManifest
+        {
+            Runtime = analysis.Runtime,
+            RuntimeVersion = analysis.RuntimeVersion,
+            CreateVirtualEnvironment = true,
+            VirtualEnvironmentPath = ".venv",
+            RequirementsFile = analysis.EnvironmentManager.Equals("uv", StringComparison.OrdinalIgnoreCase) ? string.Empty : analysis.RequirementsFile,
+            ManagedRuntimeId = ManagedPythonRuntimeService.Python312.Id,
+            PythonInstallArguments = analysis.EnvironmentManager.Equals("pip", StringComparison.OrdinalIgnoreCase) && File.Exists(Path.Combine(pluginRoot, "pyproject.toml"))
+                ? ["-m", "pip", "install", "--disable-pip-version-check", "-e", "."]
+                : []
+        };
+        await EnsureAsync(baseManifest, pluginRoot, dataRoot, httpClient, progress, cancellationToken: cancellationToken);
+        if (!analysis.EnvironmentManager.Equals("uv", StringComparison.OrdinalIgnoreCase))
+        {
+            return;
+        }
+
+        var environmentPython = Path.Combine(pluginRoot, ".venv", "Scripts", "python.exe");
+        progress?.Report("Installing the uv environment manager");
+        await RunAsync(environmentPython, ["-m", "pip", "install", "--disable-pip-version-check", "uv"], pluginRoot, cancellationToken);
+        var uvExecutable = Path.Combine(pluginRoot, ".venv", "Scripts", "uv.exe");
+        progress?.Report("Synchronizing repository dependencies with uv");
+        await RunAsync(uvExecutable, analysis.EnvironmentArguments, pluginRoot, cancellationToken);
+    }
+
     public static async Task EnsureAsync(PluginPackageManifest manifest, string pluginRoot, string dataRoot, HttpClient httpClient, IProgress<string>? progress = null, IProgress<PluginDownloadProgress>? downloadProgress = null, CancellationToken cancellationToken = default)
     {
         if (!manifest.CreateVirtualEnvironment)

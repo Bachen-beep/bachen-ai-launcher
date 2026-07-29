@@ -39,6 +39,7 @@ internal sealed class GitHubModelImportService(HttpClient httpClient)
         string repository,
         string branch,
         string dataRoot,
+        string? installDirectory = null,
         IProgress<string>? progress = null,
         CancellationToken cancellationToken = default)
     {
@@ -75,7 +76,9 @@ internal sealed class GitHubModelImportService(HttpClient httpClient)
         var downloadsRoot = Path.GetFullPath(Path.Combine(dataRoot, "downloads"));
         Directory.CreateDirectory(pluginsRoot);
         Directory.CreateDirectory(downloadsRoot);
-        var targetRoot = Path.Combine(pluginsRoot, safeId);
+        var targetRoot = string.IsNullOrWhiteSpace(installDirectory)
+            ? Path.Combine(pluginsRoot, safeId)
+            : ValidateInstallDirectory(installDirectory);
         if (Directory.Exists(targetRoot))
         {
             var metadataPath = Path.Combine(targetRoot, ".bachen-github-source.json");
@@ -86,11 +89,28 @@ internal sealed class GitHubModelImportService(HttpClient httpClient)
                 var savedCommit = metadata.RootElement.GetProperty("commitSha").GetString();
                 if (repository.Equals(savedRepository, StringComparison.OrdinalIgnoreCase) && commitSha.Equals(savedCommit, StringComparison.OrdinalIgnoreCase))
                 {
-                    progress?.Report("Reusing the previously verified GitHub source");
-                    return new GitHubModelImportResult(targetRoot, commitSha, branch);
+                    var hasRepositoryContent = Directory.EnumerateFileSystemEntries(targetRoot)
+                        .Any(path => !Path.GetFileName(path).Equals(".bachen-github-source.json", StringComparison.OrdinalIgnoreCase));
+                    if (hasRepositoryContent)
+                    {
+                        progress?.Report("Reusing the previously verified GitHub source");
+                        return new GitHubModelImportResult(targetRoot, commitSha, branch);
+                    }
+                    progress?.Report("The cached source is incomplete; extracting it again");
+                    Directory.Delete(targetRoot, true);
                 }
             }
-            throw new IOException($"The managed plugin directory already exists: {targetRoot}");
+            if (Directory.Exists(targetRoot))
+            {
+                if (!Directory.EnumerateFileSystemEntries(targetRoot).Any())
+                {
+                    Directory.Delete(targetRoot);
+                }
+                else
+                {
+                    throw new IOException($"The managed plugin directory already exists and is not empty: {targetRoot}");
+                }
+            }
         }
 
         var archivePath = Path.Combine(downloadsRoot, $"{safeId}-{commitSha[..12]}.zip");
@@ -175,4 +195,19 @@ internal sealed class GitHubModelImportService(HttpClient httpClient)
 
     private static string SanitizeId(string value)
         => new(value.ToLowerInvariant().Select(character => char.IsLetterOrDigit(character) || character is '-' or '_' ? character : '-').ToArray());
+
+    private static string ValidateInstallDirectory(string installDirectory)
+    {
+        var fullPath = Path.GetFullPath(Environment.ExpandEnvironmentVariables(installDirectory.Trim()));
+        var root = Path.GetPathRoot(fullPath);
+        if (string.IsNullOrWhiteSpace(root) || fullPath.Equals(root, StringComparison.OrdinalIgnoreCase))
+        {
+            throw new InvalidDataException("The plugin install directory cannot be a drive root.");
+        }
+        if (File.Exists(fullPath))
+        {
+            throw new IOException($"The plugin install directory is an existing file: {fullPath}");
+        }
+        return fullPath.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+    }
 }

@@ -2301,7 +2301,7 @@ internal sealed class LauncherForm : Form
         menu.Items.Add(L("受信任发布者", "Trusted publishers"), null, (_, _) => ShowTrustedPublishersDialog());
         menu.Items.Add(L("删除 Hugging Face 登录凭据", "Delete Hugging Face credential"), null, (_, _) => DeleteHuggingFaceCredential());
         menu.Items.Add(new ToolStripSeparator());
-        menu.Items.Add(L("从 GitHub 添加模型", "Add model from GitHub"), null, async (_, _) => await ShowAddModelDialogAsync());
+        menu.Items.Add(L("从 GitHub 添加模型", "Add model from GitHub"), null, async (_, _) => await ShowAnalyzedGitHubModelDialogAsync());
         menu.Items.Add(L("运行环境自检", "Run environment check"), null, (_, _) => ShowEnvironmentReport());
         menu.Items.Add(L("配置模型目录与端口", "Configure paths and ports"), null, (_, _) => ShowSettingsDialog());
         menu.Items.Add(L("恢复源码备份", "Restore source backup"), null, async (_, _) => await RestoreBackupAsync());
@@ -2777,6 +2777,184 @@ internal sealed class LauncherForm : Form
         dialog.ShowDialog(this);
     }
 
+    private async Task ShowAnalyzedGitHubModelDialogAsync()
+    {
+        using var dialog = new Form
+        {
+            Text = L("从 GitHub 添加模型", "Add model from GitHub"),
+            StartPosition = FormStartPosition.CenterParent,
+            ClientSize = new Size(820, 400),
+            MinimumSize = new Size(740, 380),
+            BackColor = Theme.Card,
+            Font = new Font("Microsoft YaHei UI", 10F),
+            ShowInTaskbar = false,
+            AutoScaleMode = AutoScaleMode.Dpi
+        };
+        var title = new Label
+        {
+            Text = L("添加一个 GitHub AI 项目", "Add a GitHub AI project"),
+            Location = new Point(28, 24),
+            AutoSize = true,
+            Font = new Font(dialog.Font, FontStyle.Bold),
+            ForeColor = Theme.DeepTeal
+        };
+        var subtitle = new Label
+        {
+            Text = L("只需提供仓库和安装目录。下载后会分析项目，并请求一次配置确认。", "Provide the repository and install directory. The launcher analyzes it and asks for one confirmation."),
+            Location = new Point(28, 56),
+            Size = new Size(700, 48),
+            ForeColor = Theme.Muted
+        };
+        var repositoryLabel = new Label { Text = L("GitHub 仓库", "GitHub repository"), Location = new Point(28, 118), Size = new Size(150, 28), TextAlign = ContentAlignment.MiddleLeft };
+        var repository = new TextBox { Location = new Point(184, 118), Size = new Size(602, 30), Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right, PlaceholderText = "https://github.com/owner/repository.git" };
+        var installLabel = new Label { Text = L("安装目录", "Install directory"), Location = new Point(28, 166), Size = new Size(150, 28), TextAlign = ContentAlignment.MiddleLeft };
+        var installDirectory = new TextBox { Location = new Point(184, 166), Size = new Size(498, 52), Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right, Multiline = true, WordWrap = true };
+        var browse = new Button { Text = L("浏览", "Browse"), Location = new Point(690, 164), Size = new Size(96, 38), Anchor = AnchorStyles.Top | AnchorStyles.Right };
+        var pathWasChosen = false;
+        repository.TextChanged += (_, _) =>
+        {
+            if (pathWasChosen || !GitHubModelImportService.TryNormalizeRepository(repository.Text, out var normalized)) return;
+            installDirectory.Text = Path.Combine(_settings.DataRoot, "plugins", normalized.Replace('/', '-').ToLowerInvariant());
+        };
+        browse.Click += (_, _) =>
+        {
+            using var picker = new FolderBrowserDialog
+            {
+                Description = L("选择插件安装目录", "Choose the plugin install directory"),
+                UseDescriptionForTitle = true,
+                SelectedPath = Directory.Exists(installDirectory.Text) ? installDirectory.Text : Path.GetDirectoryName(installDirectory.Text) ?? _settings.DataRoot
+            };
+            if (picker.ShowDialog(dialog) != DialogResult.OK) return;
+            pathWasChosen = true;
+            installDirectory.Text = picker.SelectedPath;
+        };
+        var status = new Label { Location = new Point(28, 238), Size = new Size(758, 66), ForeColor = Theme.Muted };
+        var cancel = new Button { Text = L("取消", "Cancel"), DialogResult = DialogResult.Cancel, Location = new Point(564, 334), Size = new Size(104, 38), Anchor = AnchorStyles.Bottom | AnchorStyles.Right };
+        var analyze = new Button { Text = L("分析仓库", "Analyze repository"), Location = new Point(676, 334), Size = new Size(110, 38), Anchor = AnchorStyles.Bottom | AnchorStyles.Right };
+        dialog.Controls.AddRange([title, subtitle, repositoryLabel, repository, installLabel, installDirectory, browse, status, cancel, analyze]);
+        dialog.CancelButton = cancel;
+        dialog.AcceptButton = analyze;
+
+        analyze.Click += async (_, _) =>
+        {
+            if (!GitHubModelImportService.TryNormalizeRepository(repository.Text, out var normalizedRepository))
+            {
+                MessageBox.Show(L("请输入有效的 GitHub 仓库地址。", "Enter a valid GitHub repository URL."), L("仓库地址无效", "Invalid repository"), MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return;
+            }
+            if (string.IsNullOrWhiteSpace(installDirectory.Text))
+            {
+                MessageBox.Show(L("请选择安装目录。", "Choose an install directory."), L("安装目录缺失", "Install directory missing"), MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return;
+            }
+            var id = normalizedRepository.Replace('/', '-').ToLowerInvariant();
+            if (_modelCatalog.Models.Any(model => model.Id.Equals(id, StringComparison.OrdinalIgnoreCase)))
+            {
+                MessageBox.Show(L("这个 GitHub 仓库已经添加。", "This GitHub repository has already been added."), L("重复插件", "Duplicate plugin"), MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return;
+            }
+
+            analyze.Enabled = false;
+            cancel.Enabled = false;
+            browse.Enabled = false;
+            repository.Enabled = false;
+            installDirectory.Enabled = false;
+            try
+            {
+                var importProgress = new Progress<string>(message =>
+                {
+                    status.Text = message;
+                    AppendLog(message);
+                });
+                var imported = await _gitHubModelImportService.ImportAsync(
+                    normalizedRepository,
+                    string.Empty,
+                    _settings.DataRoot,
+                    installDirectory.Text,
+                    importProgress);
+                var hasNvidiaGpu = SystemResourceProbe.ReadPrimaryGpu() is not null;
+                status.Text = L("正在分析仓库结构和启动方式……", "Analyzing repository structure and launch behavior...");
+                var analysis = GitHubRepositoryAnalyzer.Analyze(normalizedRepository, imported.RootDirectory, hasNvidiaGpu);
+                var usedPorts = _modelCatalog.Models.Select(model => model.Port).ToHashSet();
+                var port = Enumerable.Range(7860, 1000).First(candidate => !usedPorts.Contains(candidate));
+                using var confirmation = new RepositoryAnalysisConfirmationForm(
+                    analysis,
+                    normalizedRepository,
+                    $"{imported.Branch} / {imported.CommitSha[..12]}",
+                    imported.RootDirectory,
+                    port,
+                    _useEnglish);
+                if (confirmation.ShowDialog(dialog) != DialogResult.OK)
+                {
+                    status.Text = L("已取消安装；下载的源码可在下次分析时复用。", "Installation canceled; the downloaded source can be reused next time.");
+                    return;
+                }
+
+                var selectedLaunch = confirmation.SelectedLaunchOption;
+                status.Text = L("正在创建运行环境并安装依赖……", "Creating the runtime environment and installing dependencies...");
+                await PythonEnvironmentService.EnsureRepositoryAsync(analysis, imported.RootDirectory, _settings.DataRoot, _githubClient, importProgress);
+                var definition = new LauncherModelDefinition
+                {
+                    Id = id,
+                    DisplayName = selectedLaunch.DisplayName.Equals(analysis.DisplayName, StringComparison.OrdinalIgnoreCase)
+                        ? analysis.DisplayName
+                        : $"{analysis.DisplayName} - {selectedLaunch.DisplayName}",
+                    Description = analysis.Description,
+                    Category = analysis.Category,
+                    RootDirectory = imported.RootDirectory,
+                    Executable = analysis.Executable,
+                    Arguments = selectedLaunch.Arguments,
+                    Runtime = analysis.Runtime,
+                    RuntimeVersion = analysis.RuntimeVersion,
+                    Port = port,
+                    RecommendedVramMiB = analysis.RecommendedVramMiB,
+                    RecommendedSystemMemoryMiB = analysis.RecommendedSystemMemoryMiB,
+                    IsHighVram = analysis.IsHighVram,
+                    RequiredFiles = [selectedLaunch.EntryScript],
+                    Dependencies = analysis.Dependencies,
+                    GitHubRepository = normalizedRepository,
+                    GitHubBranch = imported.Branch,
+                    InstalledVersion = imported.CommitSha[..12],
+                    Publisher = normalizedRepository.Split('/')[0],
+                    TrustSource = "GitHubUserImport",
+                    PreservedPaths = [".venv", "models", "checkpoints", "outputs", "logs"]
+                };
+                var missing = GetMissingRequirements(CreateCustomProfile(definition));
+                if (missing.Count > 0)
+                {
+                    throw new InvalidOperationException(L("自动配置完成，但仍缺少：\n", "Automatic configuration completed, but these items are missing:\n") + string.Join(Environment.NewLine, missing));
+                }
+                _modelCatalog.Models.Add(definition);
+                SaveModelCatalog(_modelCatalog);
+                ConfigureProfiles();
+                Controls.Clear();
+                InitializeUi();
+                RefreshStatus();
+                AppendLog(L($"已自动配置 GitHub 模型：{definition.DisplayName} ({definition.InstalledVersion})", $"GitHub model configured automatically: {definition.DisplayName} ({definition.InstalledVersion})"));
+                dialog.DialogResult = DialogResult.OK;
+                dialog.Close();
+            }
+            catch (Exception ex)
+            {
+                status.Text = ex.Message;
+                AppendLog(L("GitHub 模型分析或安装失败：", "GitHub model analysis or installation failed: ") + ex.Message, null, true);
+                MessageBox.Show(ex.Message, L("分析或安装失败", "Analysis or installation failed"), MessageBoxButtons.OK, MessageBoxIcon.Error);
+            }
+            finally
+            {
+                if (!dialog.IsDisposed)
+                {
+                    analyze.Enabled = true;
+                    cancel.Enabled = true;
+                    browse.Enabled = true;
+                    repository.Enabled = true;
+                    installDirectory.Enabled = true;
+                }
+            }
+        };
+        dialog.ShowDialog(this);
+    }
+
     private async Task ShowAddModelDialogAsync()
     {
         using var dialog = new Form
@@ -2931,7 +3109,7 @@ internal sealed class LauncherForm : Form
                     normalizedRepository,
                     branch.Text,
                     _settings.DataRoot,
-                    importProgress);
+                    progress: importProgress);
                 root.Text = imported.RootDirectory;
 
                 var executableValue = executable.Text.Trim().Replace('\\', '/');

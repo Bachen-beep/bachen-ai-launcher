@@ -314,7 +314,36 @@ internal static class LauncherSelfTests
                 Assert(File.Exists(Path.Combine(imported.RootDirectory, ".bachen-github-source.json")), "GitHub import provenance metadata", lines);
                 var reused = await new GitHubModelImportService(importClient).ImportAsync("example/model-repo", "main", importRoot);
                 Assert(reused.RootDirectory == imported.RootDirectory, "Verified GitHub source reuse after setup retry", lines);
+                File.Delete(Path.Combine(imported.RootDirectory, "app.py"));
+                var repaired = await new GitHubModelImportService(importClient).ImportAsync("example/model-repo", "main", importRoot);
+                Assert(File.Exists(Path.Combine(repaired.RootDirectory, "app.py")), "Incomplete cached GitHub source is automatically restored", lines);
+                var customInstallDirectory = Path.Combine(testRoot, "custom-plugin-location");
+                Directory.CreateDirectory(customInstallDirectory);
+                var customImported = await new GitHubModelImportService(importClient).ImportAsync("example/custom-location", "main", importRoot, customInstallDirectory);
+                Assert(customImported.RootDirectory == Path.GetFullPath(customInstallDirectory) && File.Exists(Path.Combine(customInstallDirectory, "app.py")), "User-selected empty GitHub plugin install directory", lines);
             }
+
+            var analyzedWooshRoot = Path.Combine(testRoot, "analyzed-woosh");
+            Directory.CreateDirectory(analyzedWooshRoot);
+            await File.WriteAllTextAsync(Path.Combine(analyzedWooshRoot, "README.md"), "# Woosh\n\nText-to-audio sound effect generation.\n\nuv sync --extra cuda\n", Encoding.UTF8);
+            await File.WriteAllTextAsync(Path.Combine(analyzedWooshRoot, "pyproject.toml"), "[project]\nname = \"woosh\"\ndescription = \"Sound effect foundation model\"\nrequires-python = \">=3.12\"\n[project.optional-dependencies]\ncuda = [\"torch\"]\ncpu = [\"torch\"]\n[tool.uv]\n", Encoding.UTF8);
+            await File.WriteAllTextAsync(Path.Combine(analyzedWooshRoot, "gradio_Woosh-Flow.py"), "# --server-name --server-port\n", Encoding.UTF8);
+            await File.WriteAllTextAsync(Path.Combine(analyzedWooshRoot, "gradio_Woosh-DFlow.py"), "# --server-name --server-port\n", Encoding.UTF8);
+            var wooshAnalysis = GitHubRepositoryAnalyzer.Analyze("SonyResearch/Woosh", analyzedWooshRoot, true);
+            Assert(wooshAnalysis.LaunchOptions.Length == 2 && wooshAnalysis.LaunchOptions[0].EntryScript == "gradio_Woosh-DFlow.py", "Repository analyzer recommends Woosh DFlow", lines);
+            Assert(wooshAnalysis.LaunchOptions[0].Arguments.Contains("--server-port {port}", StringComparison.Ordinal) && wooshAnalysis.EnvironmentManager == "uv" && wooshAnalysis.EnvironmentArguments.Contains("cuda"), "Repository analyzer configures Woosh port and CUDA uv profile", lines);
+            Assert(wooshAnalysis.RuntimeVersion == ">=3.12" && wooshAnalysis.Category == "Audio generation", "Repository analyzer reads Python and category metadata", lines);
+
+            var analyzedGenericRoot = Path.Combine(testRoot, "analyzed-generic");
+            Directory.CreateDirectory(analyzedGenericRoot);
+            await File.WriteAllTextAsync(Path.Combine(analyzedGenericRoot, "requirements.txt"), "gradio\n", Encoding.UTF8);
+            await File.WriteAllTextAsync(Path.Combine(analyzedGenericRoot, "app.py"), "print('app')\n", Encoding.UTF8);
+            var genericAnalysis = GitHubRepositoryAnalyzer.Analyze("example/generic", analyzedGenericRoot, false);
+            Assert(genericAnalysis.LaunchOptions.Single().EntryScript == "app.py" && genericAnalysis.EnvironmentManager == "pip", "Generic Python repository automatic configuration", lines);
+            var noEntryRoot = Path.Combine(testRoot, "analyzed-no-entry");
+            Directory.CreateDirectory(noEntryRoot);
+            await File.WriteAllTextAsync(Path.Combine(noEntryRoot, "worker.py"), "print('worker')\n", Encoding.UTF8);
+            AssertThrows(() => GitHubRepositoryAnalyzer.Analyze("example/no-entry", noEntryRoot, false), "Unknown repository entry is not guessed", lines);
 
             var downloadRoot = Path.Combine(testRoot, "download-resume");
             var downloadDirectory = Path.Combine(downloadRoot, "downloads");
