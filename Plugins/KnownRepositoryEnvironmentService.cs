@@ -23,6 +23,16 @@ internal static class KnownRepositoryEnvironmentService
             : normalized + " --model small-sfx";
     }
 
+    public static string BuildStableAudioLaunchArguments(string model)
+    {
+        model = model.Trim().ToLowerInvariant();
+        if (model is not ("small-sfx" or "small-music" or "medium"))
+        {
+            throw new ArgumentOutOfRangeException(nameof(model), model, "Unknown Stable Audio 3 model profile.");
+        }
+        return $"run_gradio.py --model {model}";
+    }
+
     public static async Task EnsureEnvironmentAsync(
         string repository,
         string launchArguments,

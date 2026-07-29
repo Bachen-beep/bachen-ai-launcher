@@ -372,6 +372,15 @@ internal static class LauncherSelfTests
             Assert(stableAudioAnalysis.LaunchOptions[0].Arguments == "run_gradio.py --model small-sfx" && stableAudioAnalysis.LaunchOptions[0].IsRecommended, "Stable Audio 3 analysis recommends a complete Small SFX launch command", lines);
             Assert(KnownRepositoryEnvironmentService.NormalizeLaunchArguments("Stability-AI/stable-audio-3", "run_gradio.py") == "run_gradio.py --model small-sfx", "Existing Stable Audio 3 imports receive the missing model argument", lines);
             Assert(KnownRepositoryEnvironmentService.NormalizeLaunchArguments("Stability-AI/stable-audio-3", "run_gradio.py --model small-sfx --port 7861") == "run_gradio.py --model small-sfx", "Stable Audio 3 removes the unsupported port command-line argument", lines);
+            var stableAudioProfileArguments = new[] { "small-sfx", "small-music", "medium" }
+                .Select(KnownRepositoryEnvironmentService.BuildStableAudioLaunchArguments)
+                .ToArray();
+            Assert(stableAudioProfileArguments.SequenceEqual(new[]
+            {
+                "run_gradio.py --model small-sfx",
+                "run_gradio.py --model small-music",
+                "run_gradio.py --model medium"
+            }) && stableAudioProfileArguments.All(arguments => !arguments.Contains("--port", StringComparison.OrdinalIgnoreCase)), "All Stable Audio launch profiles omit the unsupported port argument", lines);
             var smallSfxAuthorization = KnownRepositoryAuthorizationService.CreateLaunchManifest("Stability-AI/stable-audio-3", "run_gradio.py --model small-sfx", "Stable Audio 3");
             var smallMusicAuthorization = KnownRepositoryAuthorizationService.CreateLaunchManifest("Stability-AI/stable-audio-3", "run_gradio.py --model=small-music", "Stable Audio 3");
             var mediumAuthorization = KnownRepositoryAuthorizationService.CreateLaunchManifest("Stability-AI/stable-audio-3", "run_gradio.py --model medium", "Stable Audio 3");

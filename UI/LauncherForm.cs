@@ -917,9 +917,9 @@ internal sealed class LauncherForm : Form
         _updateSources = updateSources.ToArray();
         _woosh = CreateSpecialProfile("woosh-dflow");
         var stableDefinition = _modelCatalog.Models.FirstOrDefault(IsStableAudioDefinition);
-        _smallSfx = CreateSpecialProfile(stableDefinition, "run_gradio.py --model small-sfx --port {port}", false, 2200, 8192);
-        _smallMusic = CreateSpecialProfile(stableDefinition, "run_gradio.py --model small-music --port {port}", false, 2200, 8192);
-        _medium = CreateSpecialProfile(stableDefinition, "run_gradio.py --model medium --port {port}", true, 8800, 16384);
+        _smallSfx = CreateStableAudioProfile(stableDefinition, "small-sfx", "Small SFX", false, 2200, 8192);
+        _smallMusic = CreateStableAudioProfile(stableDefinition, "small-music", "Small Music", false, 2200, 8192);
+        _medium = CreateStableAudioProfile(stableDefinition, "medium", "Medium", true, 8800, 16384);
         _indexTts = CreateSpecialProfile("indextts2");
         if (_selectedStableProfile is null || _smallSfx is null || !_selectedStableProfile.WorkingDirectory.Equals(_smallSfx.WorkingDirectory, StringComparison.OrdinalIgnoreCase))
         {
@@ -946,6 +946,23 @@ internal sealed class LauncherForm : Form
 
     internal static bool SupportsStableAudioProfiles(LauncherModelDefinition definition)
         => IsStableAudioDefinition(definition);
+
+    private ServiceProfile? CreateStableAudioProfile(
+        LauncherModelDefinition? definition,
+        string model,
+        string profileName,
+        bool isHighVram,
+        int recommendedVramMiB,
+        int recommendedSystemMemoryMiB)
+    {
+        var profile = CreateSpecialProfile(
+            definition,
+            KnownRepositoryEnvironmentService.BuildStableAudioLaunchArguments(model),
+            isHighVram,
+            recommendedVramMiB,
+            recommendedSystemMemoryMiB);
+        return profile is null ? null : profile with { Name = $"Stable Audio 3 - {profileName}" };
+    }
 
     private ServiceProfile? CreateSpecialProfile(LauncherModelDefinition? definition, string? arguments = null, bool? isHighVram = null, int? recommendedVramMiB = null, int? recommendedSystemMemoryMiB = null)
     {
@@ -4496,7 +4513,13 @@ internal sealed class LauncherForm : Form
             {
                 definition.Arguments = normalizedArguments;
                 SaveModelCatalog(_modelCatalog);
-                profile = CreateCustomProfile(definition);
+            }
+            var normalizedProfileArguments = KnownRepositoryEnvironmentService.NormalizeLaunchArguments(
+                definition.GitHubRepository,
+                profile.Arguments);
+            if (!normalizedProfileArguments.Equals(profile.Arguments, StringComparison.Ordinal))
+            {
+                profile = profile with { Arguments = normalizedProfileArguments };
             }
 
             var trust = InstalledPluginTrustValidator.Verify(definition, _trustedPublishers);
