@@ -90,7 +90,8 @@ internal sealed class GitHubModelImportService(HttpClient httpClient)
                 if (repository.Equals(savedRepository, StringComparison.OrdinalIgnoreCase) && commitSha.Equals(savedCommit, StringComparison.OrdinalIgnoreCase))
                 {
                     var hasRepositoryContent = Directory.EnumerateFileSystemEntries(targetRoot)
-                        .Any(path => !Path.GetFileName(path).Equals(".bachen-github-source.json", StringComparison.OrdinalIgnoreCase));
+                        .Any(path => !Path.GetFileName(path).Equals(".bachen-github-source.json", StringComparison.OrdinalIgnoreCase) &&
+                                     !Path.GetFileName(path).Equals(".bachen-ai-launcher-update.json", StringComparison.OrdinalIgnoreCase));
                     if (hasRepositoryContent)
                     {
                         progress?.Report("Reusing the previously verified GitHub source");
@@ -148,6 +149,10 @@ internal sealed class GitHubModelImportService(HttpClient httpClient)
             await File.WriteAllTextAsync(
                 Path.Combine(targetRoot, ".bachen-github-source.json"),
                 JsonSerializer.Serialize(new { repository, branch, commitSha }, new JsonSerializerOptions { WriteIndented = true }),
+                cancellationToken);
+            await File.WriteAllTextAsync(
+                Path.Combine(targetRoot, ".bachen-ai-launcher-update.json"),
+                JsonSerializer.Serialize(new SourceUpdateState(commitSha, DateTimeOffset.Now), new JsonSerializerOptions { WriteIndented = true }),
                 cancellationToken);
             if (!contentRoot.Equals(stagingRoot, StringComparison.OrdinalIgnoreCase) && Directory.Exists(stagingRoot))
             {

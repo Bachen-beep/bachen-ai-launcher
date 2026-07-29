@@ -154,9 +154,9 @@ internal static class GitHubRepositoryAnalyzer
 
         return
         [
-            new RepositoryLaunchOption("Small SFX", "run_gradio.py", "run_gradio.py --model small-sfx --port {port}", true),
-            new RepositoryLaunchOption("Small Music", "run_gradio.py", "run_gradio.py --model small-music --port {port}"),
-            new RepositoryLaunchOption("Medium", "run_gradio.py", "run_gradio.py --model medium --port {port}")
+            new RepositoryLaunchOption("Small SFX", "run_gradio.py", "run_gradio.py --model small-sfx", true),
+            new RepositoryLaunchOption("Small Music", "run_gradio.py", "run_gradio.py --model small-music"),
+            new RepositoryLaunchOption("Medium", "run_gradio.py", "run_gradio.py --model medium")
         ];
     }
 

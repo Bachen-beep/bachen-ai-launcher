@@ -1,3 +1,5 @@
+using System.Text.RegularExpressions;
+
 namespace BaChenAiLauncher;
 
 internal static class KnownRepositoryEnvironmentService
@@ -9,9 +11,17 @@ internal static class KnownRepositoryEnvironmentService
            !File.Exists(Path.Combine(rootDirectory, ".venv", "Lib", "site-packages", "gradio", "__init__.py"));
 
     public static string NormalizeLaunchArguments(string repository, string launchArguments)
-        => IsStableAudioGradio(repository, launchArguments) && !launchArguments.Contains("--model", StringComparison.OrdinalIgnoreCase)
-            ? "run_gradio.py --model small-sfx --port {port}"
-            : launchArguments;
+    {
+        if (!IsStableAudioGradio(repository, launchArguments))
+        {
+            return launchArguments;
+        }
+
+        var normalized = Regex.Replace(launchArguments, @"\s+--port\s+\S+", string.Empty, RegexOptions.IgnoreCase).Trim();
+        return normalized.Contains("--model", StringComparison.OrdinalIgnoreCase)
+            ? normalized
+            : normalized + " --model small-sfx";
+    }
 
     public static async Task EnsureEnvironmentAsync(
         string repository,

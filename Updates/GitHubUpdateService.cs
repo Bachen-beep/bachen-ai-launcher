@@ -18,7 +18,25 @@ internal sealed class GitHubUpdateService(HttpClient client)
             {
                 path = Path.Combine(source.DeploymentRoot, ".ai-audio-launcher-update.json");
             }
-            return File.Exists(path) ? JsonSerializer.Deserialize<SourceUpdateState>(File.ReadAllText(path)) : null;
+            if (File.Exists(path))
+            {
+                return JsonSerializer.Deserialize<SourceUpdateState>(File.ReadAllText(path));
+            }
+
+            var importMetadataPath = Path.Combine(source.DeploymentRoot, ".bachen-github-source.json");
+            if (!File.Exists(importMetadataPath))
+            {
+                return null;
+            }
+            using var metadata = JsonDocument.Parse(File.ReadAllText(importMetadataPath));
+            var repository = metadata.RootElement.GetProperty("repository").GetString();
+            var commitSha = metadata.RootElement.GetProperty("commitSha").GetString();
+            if (!source.Repository.Equals(repository, StringComparison.OrdinalIgnoreCase) ||
+                string.IsNullOrWhiteSpace(commitSha) || commitSha.Length != 40 || commitSha.Any(character => !Uri.IsHexDigit(character)))
+            {
+                return null;
+            }
+            return new SourceUpdateState(commitSha, File.GetLastWriteTimeUtc(importMetadataPath));
         }
         catch
         {

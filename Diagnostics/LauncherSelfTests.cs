@@ -1,6 +1,7 @@
 using System.IO.Compression;
 using System.Security.Cryptography;
 using System.Text;
+using System.Text.Json;
 
 namespace BaChenAiLauncher;
 
@@ -316,6 +317,7 @@ internal static class LauncherSelfTests
                 Assert(imported.CommitSha == importedCommit && imported.Branch == "main" && File.Exists(Path.Combine(imported.RootDirectory, "app.py")), "GitHub model import pinned to immutable commit and default branch", lines);
                 Assert(LauncherForm.DetectPythonEntryPoint(imported.RootDirectory) == "app.py", "Python launch entry auto-detection", lines);
                 Assert(File.Exists(Path.Combine(imported.RootDirectory, ".bachen-github-source.json")), "GitHub import provenance metadata", lines);
+                Assert(File.Exists(Path.Combine(imported.RootDirectory, ".bachen-ai-launcher-update.json")), "GitHub import creates an initial update baseline", lines);
                 var reused = await new GitHubModelImportService(importClient).ImportAsync("example/model-repo", "main", importRoot);
                 Assert(reused.RootDirectory == imported.RootDirectory, "Verified GitHub source reuse after setup retry", lines);
                 File.Delete(Path.Combine(imported.RootDirectory, "app.py"));
@@ -360,13 +362,22 @@ internal static class LauncherSelfTests
             await File.WriteAllTextAsync(Path.Combine(analyzedStableAudioRoot, "run_gradio.py"), "import gradio\n# --model --port\n", Encoding.UTF8);
             var stableAudioAnalysis = GitHubRepositoryAnalyzer.Analyze("Stability-AI/stable-audio-3", analyzedStableAudioRoot, true);
             Assert(stableAudioAnalysis.EnvironmentArguments.Contains("ui") && stableAudioAnalysis.LaunchOptions.Length == 3, "Stable Audio 3 analysis installs the Gradio UI extra and offers three model profiles", lines);
-            Assert(stableAudioAnalysis.LaunchOptions[0].Arguments == "run_gradio.py --model small-sfx --port {port}" && stableAudioAnalysis.LaunchOptions[0].IsRecommended, "Stable Audio 3 analysis recommends a complete Small SFX launch command", lines);
-            Assert(KnownRepositoryEnvironmentService.NormalizeLaunchArguments("Stability-AI/stable-audio-3", "run_gradio.py") == "run_gradio.py --model small-sfx --port {port}", "Existing Stable Audio 3 imports receive the missing model and port arguments", lines);
+            Assert(stableAudioAnalysis.LaunchOptions[0].Arguments == "run_gradio.py --model small-sfx" && stableAudioAnalysis.LaunchOptions[0].IsRecommended, "Stable Audio 3 analysis recommends a complete Small SFX launch command", lines);
+            Assert(KnownRepositoryEnvironmentService.NormalizeLaunchArguments("Stability-AI/stable-audio-3", "run_gradio.py") == "run_gradio.py --model small-sfx", "Existing Stable Audio 3 imports receive the missing model argument", lines);
+            Assert(KnownRepositoryEnvironmentService.NormalizeLaunchArguments("Stability-AI/stable-audio-3", "run_gradio.py --model small-sfx --port 7861") == "run_gradio.py --model small-sfx", "Stable Audio 3 removes the unsupported port command-line argument", lines);
             Assert(KnownRepositoryEnvironmentService.HasMissingEnvironment("Stability-AI/stable-audio-3", "run_gradio.py", analyzedStableAudioRoot), "Stable Audio 3 missing Gradio dependency is detected", lines);
             var gradioPackage = Path.Combine(analyzedStableAudioRoot, ".venv", "Lib", "site-packages", "gradio", "__init__.py");
             Directory.CreateDirectory(Path.GetDirectoryName(gradioPackage)!);
             await File.WriteAllTextAsync(gradioPackage, string.Empty, Encoding.UTF8);
             Assert(!KnownRepositoryEnvironmentService.HasMissingEnvironment("Stability-AI/stable-audio-3", "run_gradio.py", analyzedStableAudioRoot), "Stable Audio 3 installed Gradio dependency is accepted", lines);
+
+            var importedUpdateRoot = Path.Combine(testRoot, "imported-update-baseline");
+            Directory.CreateDirectory(importedUpdateRoot);
+            const string importedBaselineSha = "1234567890abcdef1234567890abcdef12345678";
+            await File.WriteAllTextAsync(Path.Combine(importedUpdateRoot, ".bachen-github-source.json"), JsonSerializer.Serialize(new { repository = "example/model", branch = "main", commitSha = importedBaselineSha }), Encoding.UTF8);
+            var importedUpdateSource = new GitHubUpdateSource("Imported model", "example/model", "main", importedUpdateRoot, [], []);
+            var importedUpdateState = new GitHubUpdateService(new HttpClient()).LoadState(importedUpdateSource);
+            Assert(importedUpdateState?.CommitSha == importedBaselineSha, "GitHub update checks use imported source metadata as the initial baseline", lines);
 
             var analyzedGenericRoot = Path.Combine(testRoot, "analyzed-generic");
             Directory.CreateDirectory(analyzedGenericRoot);
