@@ -149,20 +149,23 @@ internal static class LauncherSelfTests
                     () => rsa.ExportSubjectPublicKeyInfoPem(),
                     [
                         new LauncherUpdateSource("Cached feed", new Uri("https://updates.example/old.json")),
-                        new LauncherUpdateSource("Current release API", new Uri("https://updates.example/api/latest"), true),
+                        new LauncherUpdateSource("Current direct release", new Uri("https://updates.example/latest.json")),
+                        new LauncherUpdateSource("Release API fallback", new Uri("https://updates.example/api/latest"), true),
                         new LauncherUpdateSource("Tampered high version", new Uri("https://updates.example/tampered.json")),
                         new LauncherUpdateSource("Unavailable feed", new Uri("https://updates.example/missing.json"))
                     ]);
                 var selectedUpdate = await multiSourceService.CheckAsync(LauncherUpdateChannel.Stable);
-                Assert(selectedUpdate.LatestVersion == new Version(99, 0, 0) && selectedUpdate.SelectedSource == "Current release API", "Stable multi-source selects highest signed version", lines);
-                Assert(selectedUpdate.HasSourceConflict && selectedUpdate.Sources.Count == 4, "Stable multi-source conflict diagnostics", lines);
+                Assert(selectedUpdate.LatestVersion == new Version(99, 0, 0) && selectedUpdate.SelectedSource == "Current direct release", "Stable direct sources select the highest signed version", lines);
+                Assert(selectedUpdate.HasSourceConflict && selectedUpdate.Sources.Count == 5, "Stable multi-source conflict diagnostics", lines);
                 Assert(selectedUpdate.Sources.Single(source => source.Name == "Tampered high version").IsValid == false, "Unsigned higher update source is rejected", lines);
+                Assert(!multiSourceHandler.RequestedPaths.Contains("/api/latest") && selectedUpdate.Sources.Single(source => source.Name == "Release API fallback").Detail.StartsWith("skipped", StringComparison.Ordinal), "Valid direct stable sources skip the anonymous GitHub API", lines);
                 Assert(multiSourceHandler.AllRequestsBypassCache, "Launcher update requests bypass ordinary caches", lines);
                 var stale = await AssertThrowsAsync<LauncherUpdateStaleException>(
                     () => multiSourceService.CheckAsync(LauncherUpdateChannel.Stable, highestObservedVersion: new Version(100, 0, 0)),
                     "Previously observed stable version rejects stale sources",
                     lines);
                 Assert(stale.RemoteVersion == new Version(99, 0, 0), "Stale update source classification", lines);
+                Assert(multiSourceHandler.RequestedPaths.Contains("/api/latest"), "Anonymous GitHub API is used only when direct sources are older than the verified version", lines);
             }
             using (var noPreviewClient = new HttpClient(new StaticJsonHandler("[]")))
             {
@@ -184,10 +187,19 @@ internal static class LauncherSelfTests
                     "All stable update sources unavailable classification",
                     lines);
             }
-            using (var previewRateLimitedClient = new HttpClient(new StatusCodeHandler(System.Net.HttpStatusCode.Forbidden)))
+            using (var previewRateLimitedClient = new HttpClient(new PreviewRateLimitFallbackHandler(JsonSerializer.Serialize(launcherUpdate))))
             {
-                var previewRateLimitedService = new LauncherSelfUpdateService(previewRateLimitedClient);
+                var previewRateLimitedService = new LauncherSelfUpdateService(
+                    previewRateLimitedClient,
+                    () => rsa.ExportSubjectPublicKeyInfoPem(),
+                    [
+                        new LauncherUpdateSource("GitHub Raw", LauncherSelfUpdateService.StableFeedUri),
+                        new LauncherUpdateSource("GitHub Latest", LauncherSelfUpdateService.DefaultManifestUri),
+                        new LauncherUpdateSource("GitHub Release API", LauncherSelfUpdateService.LatestReleaseApiUri, true)
+                    ]);
                 Assert(await previewRateLimitedService.ResolveManifestUriWithFallbackAsync(LauncherUpdateChannel.Preview) == LauncherSelfUpdateService.DefaultManifestUri, "Preview API rate limit falls back to stable manifest", lines);
+                var previewFallback = await previewRateLimitedService.CheckAsync(LauncherUpdateChannel.Preview);
+                Assert(previewFallback.LatestVersion == new Version(99, 0, 0) && previewFallback.SelectedSource != "GitHub Preview API", "Preview update check automatically uses signed stable sources after API rate limiting", lines);
             }
 
             var offlineDataPath = Path.Combine(testRoot, "offline-existing-plugin.dat");
@@ -885,9 +897,11 @@ internal static class LauncherSelfTests
         private readonly List<bool> cacheChecks = [];
 
         public bool AllRequestsBypassCache => cacheChecks.Count > 0 && cacheChecks.All(value => value);
+        public List<string> RequestedPaths { get; } = [];
 
         protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
         {
+            RequestedPaths.Add(request.RequestUri?.AbsolutePath ?? string.Empty);
             cacheChecks.Add(
                 request.RequestUri?.Query.Contains("bachen_request=", StringComparison.Ordinal) == true &&
                 request.Headers.CacheControl?.NoCache == true &&
@@ -903,6 +917,26 @@ internal static class LauncherSelfTests
             return Task.FromResult(new HttpResponseMessage(System.Net.HttpStatusCode.ServiceUnavailable)
             {
                 RequestMessage = request
+            });
+        }
+    }
+
+    private sealed class PreviewRateLimitFallbackHandler(string stableManifest) : HttpMessageHandler
+    {
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            if (request.RequestUri?.Host.Equals("api.github.com", StringComparison.OrdinalIgnoreCase) == true)
+            {
+                return Task.FromResult(new HttpResponseMessage(System.Net.HttpStatusCode.Forbidden)
+                {
+                    RequestMessage = request,
+                    Content = new StringContent("{\"message\":\"API rate limit exceeded\"}", Encoding.UTF8, "application/json")
+                });
+            }
+            return Task.FromResult(new HttpResponseMessage(System.Net.HttpStatusCode.OK)
+            {
+                RequestMessage = request,
+                Content = new StringContent(stableManifest, Encoding.UTF8, "application/json")
             });
         }
     }

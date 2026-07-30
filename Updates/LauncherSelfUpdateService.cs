@@ -66,8 +66,8 @@ internal sealed class LauncherSelfUpdateService
         this.stableSources = stableSources ??
         [
             new LauncherUpdateSource("GitHub Raw", StableFeedUri),
-            new LauncherUpdateSource("GitHub Release API", LatestReleaseApiUri, true),
-            new LauncherUpdateSource("GitHub Latest", DefaultManifestUri)
+            new LauncherUpdateSource("GitHub Latest", DefaultManifestUri),
+            new LauncherUpdateSource("GitHub Release API", LatestReleaseApiUri, true)
         ];
     }
 
@@ -83,12 +83,24 @@ internal sealed class LauncherSelfUpdateService
         }
         else if (channel == LauncherUpdateChannel.Stable)
         {
-            results = await Task.WhenAll(stableSources.Select(FetchManifestSourceAsync));
+            results = await FetchStableSourcesAsync(highestObservedVersion);
         }
         else
         {
-            var previewUri = await ResolveManifestUriAsync(LauncherUpdateChannel.Preview);
-            results = [await FetchManifestSourceAsync(new LauncherUpdateSource("GitHub Preview", previewUri))];
+            try
+            {
+                var previewUri = await ResolveManifestUriAsync(LauncherUpdateChannel.Preview);
+                results = [await FetchManifestSourceAsync(new LauncherUpdateSource("GitHub Preview", previewUri))];
+            }
+            catch (HttpRequestException ex)
+            {
+                var stableResults = await FetchStableSourcesAsync(highestObservedVersion);
+                results =
+                [
+                    new LauncherUpdateSourceResult("GitHub Preview API", ReleasesApiUri, null, $"fallback: {ex.Message}"),
+                    .. stableResults
+                ];
+            }
         }
 
         var selected = results
@@ -115,6 +127,34 @@ internal sealed class LauncherSelfUpdateService
             throw new InvalidOperationException($"This update requires launcher {minimum} or newer. Install the latest setup package manually.");
         }
         return new LauncherUpdateCheck(manifest, current, latest, selected.Name, results);
+    }
+
+    private async Task<IReadOnlyList<LauncherUpdateSourceResult>> FetchStableSourcesAsync(Version? highestObservedVersion)
+    {
+        var directSources = stableSources.Where(source => !source.IsReleaseApi).ToArray();
+        var apiSources = stableSources.Where(source => source.IsReleaseApi).ToArray();
+        var results = (await Task.WhenAll(directSources.Select(FetchManifestSourceAsync))).ToList();
+        var latestDirectVersion = results
+            .Where(result => result.Version is not null)
+            .Select(result => result.Version!)
+            .DefaultIfEmpty()
+            .Max();
+        var needsApiFallback = latestDirectVersion is null ||
+            (highestObservedVersion is not null && latestDirectVersion < highestObservedVersion);
+
+        if (needsApiFallback)
+        {
+            results.AddRange(await Task.WhenAll(apiSources.Select(FetchManifestSourceAsync)));
+        }
+        else
+        {
+            results.AddRange(apiSources.Select(source => new LauncherUpdateSourceResult(
+                source.Name,
+                source.Uri,
+                null,
+                "skipped: signed direct source available")));
+        }
+        return results;
     }
 
     private async Task<LauncherUpdateSourceResult> FetchManifestSourceAsync(LauncherUpdateSource source)
