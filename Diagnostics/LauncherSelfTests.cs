@@ -335,11 +335,31 @@ internal static class LauncherSelfTests
             using (var assetClient = new HttpClient(new StaticBytesHandler(assetBytes)))
             {
                 var versionSixDataRoot = Path.Combine(testRoot, "version-six-data");
-                var versionSixInstall = await new PluginPackageService(assetClient).InstallAsync(versionSixManifest, packagePath, versionSixDataRoot);
+                var installStages = new List<string>();
+                var versionSixInstall = await new PluginPackageService(assetClient).InstallAsync(
+                    versionSixManifest,
+                    packagePath,
+                    versionSixDataRoot,
+                    new CallbackProgress<string>(installStages.Add));
                 Assert(File.Exists(Path.Combine(versionSixInstall.Definition.RootDirectory, "models", "tiny-model", "model.bin")), "Manifest v6 verified asset extraction", lines);
                 var preflight = PluginInstallPreflightService.Assess(versionSixManifest, versionSixDataRoot, () => (0, 8192));
                 Assert(preflight.RequiredDiskBytes >= (versionSixManifest.PackageSizeBytes + assetBytes.Length) * 2, "Asset packages included in disk preflight", lines);
+                Assert(installStages.Any(stage => stage.StartsWith("Verifying plugin package", StringComparison.Ordinal)) &&
+                    installStages.Any(stage => stage.StartsWith("Extracting plugin package", StringComparison.Ordinal)) &&
+                    installStages.Any(stage => stage.StartsWith("Downloading model asset", StringComparison.Ordinal)) &&
+                    installStages.Any(stage => stage.StartsWith("Extracting model asset", StringComparison.Ordinal)) &&
+                    installStages.Any(stage => stage.StartsWith("Validating installed plugin files", StringComparison.Ordinal)) &&
+                    installStages.Any(stage => stage.StartsWith("Activating plugin", StringComparison.Ordinal)) &&
+                    installStages.Any(stage => stage.StartsWith("Plugin installation complete", StringComparison.Ordinal)),
+                    "Plugin installation emits visible lifecycle stages", lines);
             }
+            Assert(FirstRunWizardForm.CalculateOverallPercentage(0, 2, 50) == 25 &&
+                FirstRunWizardForm.CalculateOverallPercentage(1, 2, 100) == 100 &&
+                FirstRunWizardForm.CalculateOverallPercentage(0, 0, 100) == 0,
+                "First-run overall installation progress calculation", lines);
+            Assert(FirstRunWizardForm.EstimateStagePercentage("Installing Python dependencies") == 82 &&
+                FirstRunWizardForm.EstimateStagePercentage("Plugin installation complete") == 100,
+                "First-run installation stage presentation mapping", lines);
             Assert(ManagedPythonRuntimeService.Python311.Id == "python-3.11.9-x64" &&
                 ManagedPythonRuntimeService.Python311.Url.EndsWith("python.3.11.9.nupkg", StringComparison.Ordinal) &&
                 ManagedPythonRuntimeService.Python311.SizeBytes == 17478009 &&
@@ -1032,6 +1052,11 @@ internal static class LauncherSelfTests
     {
         protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
             => Task.FromException<HttpResponseMessage>(exception);
+    }
+
+    private sealed class CallbackProgress<T>(Action<T> callback) : IProgress<T>
+    {
+        public void Report(T value) => callback(value);
     }
 
     private sealed class RetryingRangeHandler(byte[] content, int failuresBeforeSuccess) : HttpMessageHandler

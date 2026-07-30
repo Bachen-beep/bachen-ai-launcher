@@ -26,9 +26,11 @@ internal sealed class PluginPackageService(HttpClient httpClient)
         var packagePath = localPackagePath;
         if (string.IsNullOrWhiteSpace(packagePath))
         {
+            setupProgress?.Report("Downloading plugin package");
             packagePath = await new PluginDownloadService(httpClient).DownloadAsync(manifest, dataRoot, downloadProgress, cancellationToken);
         }
 
+        setupProgress?.Report("Verifying plugin package");
         packagePath = Path.GetFullPath(packagePath);
         if (!File.Exists(packagePath) || !Path.GetExtension(packagePath).Equals(".zip", StringComparison.OrdinalIgnoreCase))
         {
@@ -51,19 +53,26 @@ internal sealed class PluginPackageService(HttpClient httpClient)
         try
         {
             Directory.CreateDirectory(stagingRoot);
+            setupProgress?.Report("Extracting plugin package");
             ExtractSecurely(packagePath, stagingRoot);
             var contentRoot = ResolveContentRoot(stagingRoot);
-            foreach (var asset in manifest.AssetPackages ?? [])
+            var assets = manifest.AssetPackages ?? [];
+            for (var assetIndex = 0; assetIndex < assets.Length; assetIndex++)
             {
-                setupProgress?.Report($"Downloading model asset {asset.Id}");
+                var asset = assets[assetIndex];
+                setupProgress?.Report($"Downloading model asset {assetIndex + 1}/{assets.Length}: {asset.Id}");
                 var assetPath = await new PluginDownloadService(httpClient).DownloadAssetAsync(manifest.Id, asset, dataRoot, downloadProgress, cancellationToken);
+                setupProgress?.Report($"Extracting model asset {assetIndex + 1}/{assets.Length}: {asset.Id}");
                 var assetRoot = ResolveSafeContentPath(contentRoot, asset.DestinationPath, "asset destination");
                 Directory.CreateDirectory(assetRoot);
                 ExtractSecurely(assetPath, assetRoot);
             }
+            setupProgress?.Report("Preparing Python environment");
             await PythonEnvironmentService.EnsureAsync(manifest, contentRoot, dataRoot, httpClient, setupProgress, downloadProgress, cancellationToken);
+            setupProgress?.Report("Validating installed plugin files");
             ValidateInstalledFiles(manifest, contentRoot);
 
+            setupProgress?.Report("Activating plugin");
             if (Directory.Exists(targetRoot))
             {
                 backupPath = Path.Combine(backupsRoot, $"{safeId}-{DateTime.Now:yyyyMMdd-HHmmss}");
@@ -80,6 +89,7 @@ internal sealed class PluginPackageService(HttpClient httpClient)
                 Directory.Delete(stagingRoot, true);
             }
 
+            setupProgress?.Report("Plugin installation complete");
             return new PluginInstallResult(new LauncherModelDefinition
             {
                 Id = safeId,

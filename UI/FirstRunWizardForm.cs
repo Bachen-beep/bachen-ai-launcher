@@ -18,8 +18,11 @@ internal sealed class FirstRunWizardForm : Form
     private TextBox? _storagePath;
     private CheckedListBox? _pluginList;
     private CheckBox? _licenseAccepted;
-    private ProgressBar? _progress;
+    private ProgressBar? _overallProgress;
+    private ProgressBar? _currentProgress;
+    private Label? _overallStatus;
     private Label? _progressStatus;
+    private TextBox? _progressHistory;
     private CancellationTokenSource? _installationCancellation;
     private int _step;
     private bool _installing;
@@ -95,8 +98,11 @@ internal sealed class FirstRunWizardForm : Form
         _storagePath = null;
         _pluginList = null;
         _licenseAccepted = null;
-        _progress = null;
+        _overallProgress = null;
+        _currentProgress = null;
+        _overallStatus = null;
         _progressStatus = null;
+        _progressHistory = null;
         string[] names =
         [
             T("存储位置", "Storage"),
@@ -211,11 +217,19 @@ internal sealed class FirstRunWizardForm : Form
     private void RenderInstallation()
     {
         AddHeading(T("准备下载和部署", "Ready to download and deploy"));
-        AddBody(T("安装过程中可以关闭向导以外的窗口。完整下载和断点文件会保留，失败的安装目录会自动清理。", "Completed downloads and partial files are preserved. Failed installation directories are cleaned automatically."), 92, 60);
-        _progress = new ProgressBar { Location = new Point(38, 190), Size = new Size(820, 26), Minimum = 0, Maximum = 100 };
-        _progressStatus = new Label { Text = T("点击“开始安装”继续。", "Select Install to continue."), Location = new Point(38, 234), Size = new Size(820, 100), ForeColor = Theme.Ink };
-        _content.Controls.Add(_progress);
+        AddBody(T("下载会显示容量和速度；解压、创建 Python 和安装依赖会显示活动动画与阶段记录。", "Downloads show size and speed. Extraction, Python setup, and dependency installation show activity and stage history."), 86, 52);
+        _overallStatus = new Label { Text = T("总体进度", "Overall progress"), Location = new Point(38, 145), Size = new Size(820, 24), ForeColor = Theme.Muted };
+        _overallProgress = new ProgressBar { Location = new Point(38, 172), Size = new Size(820, 22), Minimum = 0, Maximum = 100 };
+        var currentLabel = new Label { Text = T("当前任务", "Current task"), Location = new Point(38, 211), Size = new Size(820, 24), ForeColor = Theme.Muted };
+        _currentProgress = new ProgressBar { Location = new Point(38, 238), Size = new Size(820, 22), Minimum = 0, Maximum = 100 };
+        _progressStatus = new Label { Text = T("点击“开始安装”继续。", "Select Install to continue."), Location = new Point(38, 274), Size = new Size(820, 48), ForeColor = Theme.Ink };
+        _progressHistory = new TextBox { Location = new Point(38, 328), Size = new Size(820, 104), Multiline = true, ReadOnly = true, ScrollBars = ScrollBars.Vertical, BackColor = Color.FromArgb(247, 250, 249), ForeColor = Theme.Muted };
+        _content.Controls.Add(_overallStatus);
+        _content.Controls.Add(_overallProgress);
+        _content.Controls.Add(currentLabel);
+        _content.Controls.Add(_currentProgress);
         _content.Controls.Add(_progressStatus);
+        _content.Controls.Add(_progressHistory);
     }
 
     private void RenderCompletion()
@@ -302,20 +316,51 @@ internal sealed class FirstRunWizardForm : Form
         _installing = true;
         _next.Enabled = false;
         _back.Enabled = false;
-        _cancel.Enabled = false;
+        _cancel.Enabled = true;
+        _cancel.Text = T("取消安装", "Cancel installation");
         _installationCancellation = new CancellationTokenSource();
         _outcomes.Clear();
         try
         {
-            foreach (var plugin in SelectedPlugins())
+            var plugins = SelectedPlugins();
+            var completedOverallPercentage = 0;
+            for (var pluginIndex = 0; pluginIndex < plugins.Count; pluginIndex++)
             {
-                var status = new Progress<string>(message => { if (_progressStatus is not null) _progressStatus.Text = $"{plugin.DisplayName}\r\n{message}"; });
+                var plugin = plugins[pluginIndex];
+                var currentStagePercentage = 0;
+                UpdateOverallProgress(pluginIndex, plugins.Count, 0, ref completedOverallPercentage);
+                if (_overallStatus is not null)
+                {
+                    _overallStatus.Text = T(
+                        $"总体进度 · 插件 {pluginIndex + 1}/{plugins.Count}",
+                        $"Overall progress · plugin {pluginIndex + 1}/{plugins.Count}");
+                }
+                AppendProgressHistory(T($"开始安装 {plugin.DisplayName}", $"Installing {plugin.DisplayName}"));
+                var status = new Progress<string>(message =>
+                {
+                    currentStagePercentage = Math.Max(currentStagePercentage, EstimateStagePercentage(message));
+                    SetCurrentProgressIndeterminate();
+                    UpdateOverallProgress(pluginIndex, plugins.Count, currentStagePercentage, ref completedOverallPercentage);
+                    if (_progressStatus is not null) _progressStatus.Text = $"{plugin.DisplayName}\r\n{LocalizeInstallStatus(message)}";
+                    AppendProgressHistory(LocalizeInstallStatus(message));
+                });
                 var download = new Progress<PluginDownloadProgress>(value =>
                 {
-                    if (_progress is not null && value.TotalBytes is > 0) _progress.Value = value.Percentage;
+                    if (_currentProgress is not null)
+                    {
+                        _currentProgress.Style = ProgressBarStyle.Blocks;
+                        _currentProgress.MarqueeAnimationSpeed = 0;
+                        _currentProgress.Value = value.TotalBytes is > 0 ? value.Percentage : 0;
+                    }
+                    var downloadStage = currentStagePercentage + (int)Math.Round(value.Percentage * Math.Min(20, 94 - currentStagePercentage) / 100d);
+                    UpdateOverallProgress(pluginIndex, plugins.Count, downloadStage, ref completedOverallPercentage);
                     if (_progressStatus is not null) _progressStatus.Text = $"{plugin.DisplayName}\r\n{FormatBytes(value.BytesReceived)} / {(value.TotalBytes is > 0 ? FormatBytes(value.TotalBytes.Value) : "?")}    {FormatBytes((long)value.BytesPerSecond)}/s";
                 });
                 _outcomes.Add(await _install(plugin, status, download, _installationCancellation.Token));
+                currentStagePercentage = 100;
+                SetCurrentProgressValue(100);
+                UpdateOverallProgress(pluginIndex, plugins.Count, 100, ref completedOverallPercentage);
+                AppendProgressHistory(T($"已完成 {plugin.DisplayName}", $"Completed {plugin.DisplayName}"));
             }
             if (_outcomes.Any(outcome => outcome.Checks.Any(check => check.IsEnforced && !check.IsSatisfied)))
             {
@@ -324,6 +369,12 @@ internal sealed class FirstRunWizardForm : Form
             _step = 5;
             await PersistAsync();
             RenderStep();
+        }
+        catch (OperationCanceledException)
+        {
+            SetCurrentProgressValue(0);
+            if (_progressStatus is not null) _progressStatus.Text = T("安装已取消，已下载的完整文件和断点文件会保留。", "Installation canceled. Completed and partial downloads were preserved.");
+            AppendProgressHistory(T("安装已取消", "Installation canceled"));
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
@@ -335,10 +386,115 @@ internal sealed class FirstRunWizardForm : Form
             _installing = false;
             _installationCancellation.Dispose();
             _installationCancellation = null;
+            _cancel.Text = T("稍后设置", "Set up later");
             _next.Enabled = true;
             _back.Enabled = _step > 0 && _step < 5;
             _cancel.Enabled = true;
         }
+    }
+
+    private void SetCurrentProgressIndeterminate()
+    {
+        if (_currentProgress is null)
+        {
+            return;
+        }
+        _currentProgress.Value = 0;
+        _currentProgress.Style = ProgressBarStyle.Marquee;
+        _currentProgress.MarqueeAnimationSpeed = 28;
+    }
+
+    private void SetCurrentProgressValue(int percentage)
+    {
+        if (_currentProgress is null)
+        {
+            return;
+        }
+        _currentProgress.Style = ProgressBarStyle.Blocks;
+        _currentProgress.MarqueeAnimationSpeed = 0;
+        _currentProgress.Value = Math.Clamp(percentage, 0, 100);
+    }
+
+    private void UpdateOverallProgress(int pluginIndex, int pluginCount, int stagePercentage, ref int displayedPercentage)
+    {
+        displayedPercentage = Math.Max(displayedPercentage, CalculateOverallPercentage(pluginIndex, pluginCount, stagePercentage));
+        if (_overallProgress is not null)
+        {
+            _overallProgress.Value = displayedPercentage;
+        }
+    }
+
+    private void AppendProgressHistory(string message)
+    {
+        if (_progressHistory is null || string.IsNullOrWhiteSpace(message))
+        {
+            return;
+        }
+        var line = $"[{DateTime.Now:HH:mm:ss}] {message}";
+        if (_progressHistory.Lines.LastOrDefault()?.EndsWith(message, StringComparison.Ordinal) == true)
+        {
+            return;
+        }
+        _progressHistory.AppendText((_progressHistory.TextLength == 0 ? string.Empty : Environment.NewLine) + line);
+    }
+
+    internal static int CalculateOverallPercentage(int pluginIndex, int pluginCount, int stagePercentage)
+    {
+        if (pluginCount <= 0)
+        {
+            return 0;
+        }
+        return (int)Math.Clamp(Math.Round((pluginIndex + Math.Clamp(stagePercentage, 0, 100) / 100d) * 100d / pluginCount), 0, 100);
+    }
+
+    internal static int EstimateStagePercentage(string message)
+        => message switch
+        {
+            _ when message.StartsWith("Downloading plugin package", StringComparison.Ordinal) => 5,
+            _ when message.StartsWith("Verifying plugin package", StringComparison.Ordinal) => 25,
+            _ when message.StartsWith("Extracting plugin package", StringComparison.Ordinal) => 30,
+            _ when message.StartsWith("Downloading model asset", StringComparison.Ordinal) => 35,
+            _ when message.StartsWith("Extracting model asset", StringComparison.Ordinal) => 55,
+            _ when message.StartsWith("Preparing Python environment", StringComparison.Ordinal) => 60,
+            _ when message.StartsWith("Project requires Python", StringComparison.Ordinal) => 61,
+            _ when message.StartsWith("Downloading managed Python", StringComparison.Ordinal) || message.StartsWith("Repairing managed Python", StringComparison.Ordinal) => 62,
+            _ when message.StartsWith("Installing portable managed Python", StringComparison.Ordinal) => 70,
+            _ when message.StartsWith("Creating Python virtual environment", StringComparison.Ordinal) => 75,
+            _ when message.StartsWith("Creating the external uv", StringComparison.Ordinal) => 76,
+            _ when message.StartsWith("Installing the external uv", StringComparison.Ordinal) => 78,
+            _ when message.StartsWith("Installing Python dependencies", StringComparison.Ordinal) || message.StartsWith("Synchronizing repository dependencies", StringComparison.Ordinal) => 82,
+            _ when message.StartsWith("Installing the Python plugin package", StringComparison.Ordinal) => 88,
+            _ when message.StartsWith("Validating installed plugin files", StringComparison.Ordinal) => 94,
+            _ when message.StartsWith("Activating plugin", StringComparison.Ordinal) => 97,
+            _ when message.StartsWith("Plugin installation complete", StringComparison.Ordinal) => 100,
+            _ => 60
+        };
+
+    private string LocalizeInstallStatus(string message)
+    {
+        if (_useEnglish)
+        {
+            return message;
+        }
+        if (message.StartsWith("Downloading plugin package", StringComparison.Ordinal)) return "正在下载插件包";
+        if (message.StartsWith("Verifying plugin package", StringComparison.Ordinal)) return "正在校验插件包";
+        if (message.StartsWith("Extracting plugin package", StringComparison.Ordinal)) return "正在解压插件包";
+        if (message.StartsWith("Downloading model asset", StringComparison.Ordinal)) return "正在下载模型资源 " + message["Downloading model asset".Length..].Trim();
+        if (message.StartsWith("Extracting model asset", StringComparison.Ordinal)) return "正在解压模型资源 " + message["Extracting model asset".Length..].Trim();
+        if (message.StartsWith("Preparing Python environment", StringComparison.Ordinal)) return "正在准备 Python 环境";
+        if (message.StartsWith("Downloading managed Python", StringComparison.Ordinal)) return "正在下载托管 Python";
+        if (message.StartsWith("Repairing managed Python", StringComparison.Ordinal)) return "正在修复托管 Python";
+        if (message.StartsWith("Installing portable managed Python", StringComparison.Ordinal)) return "正在安装便携 Python";
+        if (message.StartsWith("Creating Python virtual environment", StringComparison.Ordinal)) return "正在创建 Python 虚拟环境";
+        if (message.StartsWith("Installing Python dependencies", StringComparison.Ordinal)) return "正在安装 Python 依赖";
+        if (message.StartsWith("Installing the Python plugin package", StringComparison.Ordinal)) return "正在安装 Python 插件包";
+        if (message.StartsWith("Validating installed plugin files", StringComparison.Ordinal)) return "正在验证安装文件";
+        if (message.StartsWith("Activating plugin", StringComparison.Ordinal)) return "正在激活插件";
+        if (message.StartsWith("Plugin installation complete", StringComparison.Ordinal)) return "插件安装完成";
+        if (message.StartsWith("Synchronizing repository dependencies", StringComparison.Ordinal)) return "正在同步仓库依赖";
+        if (message.StartsWith("Creating the external uv", StringComparison.Ordinal)) return "正在创建 uv 工具环境";
+        if (message.StartsWith("Installing the external uv", StringComparison.Ordinal)) return "正在安装 uv 环境管理器";
+        return message;
     }
 
     private async Task PersistAsync()
