@@ -63,7 +63,13 @@ internal static class GitHubRepositoryAnalyzer
         var category = DetectCategory(combinedText);
         var usesUv = File.Exists(Path.Combine(repositoryRoot, "uv.lock")) || pyproject.Contains("[tool.uv]", StringComparison.OrdinalIgnoreCase) || Regex.IsMatch(readme, @"\buv\s+sync\b", RegexOptions.IgnoreCase);
         var environmentArguments = usesUv
-            ? BuildUvArguments(pyproject, readme, hasNvidiaGpu, options.Any(option => option.EntryScript.Contains("gradio", StringComparison.OrdinalIgnoreCase)))
+            ? BuildUvArguments(
+                pyproject,
+                readme,
+                hasNvidiaGpu,
+                options.Any(option =>
+                    option.EntryScript.Contains("gradio", StringComparison.OrdinalIgnoreCase) ||
+                    option.EntryScript.Contains("webui", StringComparison.OrdinalIgnoreCase)))
             : pyproject.Length > 0
                 ? ["-m", "pip", "install", "--disable-pip-version-check", "-e", "."]
                 : [];
@@ -137,15 +143,33 @@ internal static class GitHubRepositoryAnalyzer
         {
             arguments.AddRange(["--extra", profile]);
         }
-        if (requiresUi && Regex.IsMatch(pyproject, @"(?m)^\s*ui\s*=\s*\[", RegexOptions.IgnoreCase))
+        if (requiresUi)
         {
-            arguments.AddRange(["--extra", "ui"]);
+            var uiExtra = new[] { "ui", "webui" }
+                .FirstOrDefault(extra => Regex.IsMatch(pyproject, $@"(?m)^\s*{extra}\s*=\s*\[", RegexOptions.IgnoreCase));
+            if (uiExtra is not null)
+            {
+                arguments.AddRange(["--extra", uiExtra]);
+            }
         }
         return arguments.ToArray();
     }
 
     private static RepositoryLaunchOption[] ApplyKnownRepositoryLaunchOptions(string repository, RepositoryLaunchOption[] detected)
     {
+        if (repository.Equals("index-tts/index-tts", StringComparison.OrdinalIgnoreCase) &&
+            detected.Any(option => option.EntryScript.Equals("webui.py", StringComparison.OrdinalIgnoreCase)))
+        {
+            return
+            [
+                new RepositoryLaunchOption(
+                    "WebUI",
+                    "webui.py",
+                    "webui.py --host 127.0.0.1 --port {port}",
+                    true)
+            ];
+        }
+
         if (!repository.Equals("Stability-AI/stable-audio-3", StringComparison.OrdinalIgnoreCase) ||
             !detected.Any(option => option.EntryScript.Equals("run_gradio.py", StringComparison.OrdinalIgnoreCase)))
         {

@@ -463,6 +463,24 @@ internal static class LauncherSelfTests
             Assert(!KnownRepositoryEnvironmentService.HasMissingEnvironment("Stability-AI/stable-audio-3", "run_gradio.py", analyzedStableAudioRoot), "Stable Audio 3 installed Gradio dependency is accepted", lines);
             Assert(PluginDependencyChecker.Check(["python>=3.10,<3.12"], analyzedStableAudioRoot).Single().IsSatisfied, "Python dependency check validates compound environment constraint", lines);
 
+            var analyzedIndexTtsRoot = Path.Combine(testRoot, "analyzed-index-tts");
+            Directory.CreateDirectory(analyzedIndexTtsRoot);
+            await File.WriteAllTextAsync(Path.Combine(analyzedIndexTtsRoot, "README.md"), "# IndexTTS2\n\nEmotionally expressive text-to-speech with a WebUI.\n", Encoding.UTF8);
+            await File.WriteAllTextAsync(Path.Combine(analyzedIndexTtsRoot, "pyproject.toml"), "[project]\nname = \"indextts\"\ndescription = \"Text-to-speech\"\nrequires-python = \">=3.10,<3.12\"\ndependencies = [\"torch==2.8.*\"]\n[project.optional-dependencies]\nwebui = [\"gradio==5.45.0\"]\n[tool.uv]\n", Encoding.UTF8);
+            await File.WriteAllTextAsync(Path.Combine(analyzedIndexTtsRoot, "uv.lock"), string.Empty, Encoding.UTF8);
+            await File.WriteAllTextAsync(Path.Combine(analyzedIndexTtsRoot, "webui.py"), "import argparse\nimport gradio as gr\nparser = argparse.ArgumentParser()\nparser.add_argument(\"--host\")\nparser.add_argument(\"--port\")\n", Encoding.UTF8);
+            var indexTtsAnalysis = GitHubRepositoryAnalyzer.Analyze("index-tts/index-tts", analyzedIndexTtsRoot, true);
+            Assert(indexTtsAnalysis.EnvironmentArguments.Contains("webui"), "IndexTTS analysis installs the WebUI optional dependency", lines);
+            Assert(indexTtsAnalysis.LaunchOptions.Length == 1 && indexTtsAnalysis.LaunchOptions[0].Arguments == "webui.py --host 127.0.0.1 --port {port}", "IndexTTS analysis configures its explicit WebUI host and port", lines);
+            Assert(KnownRepositoryEnvironmentService.NormalizeLaunchArguments("index-tts/index-tts", "webui.py") == "webui.py --host 127.0.0.1 --port {port}", "Existing IndexTTS imports receive host and port arguments", lines);
+            Assert(KnownRepositoryEnvironmentService.NormalizeLaunchArguments("index-tts/index-tts", "webui.py --host=0.0.0.0 --port 7860") == "webui.py --host 127.0.0.1 --port {port}", "Existing IndexTTS host and port arguments are migrated", lines);
+            Assert(KnownRepositoryEnvironmentService.HasMissingEnvironment("index-tts/index-tts", "webui.py", analyzedIndexTtsRoot), "IndexTTS missing Gradio dependency is detected", lines);
+            var indexGradioPackage = Path.Combine(analyzedIndexTtsRoot, ".venv", "Lib", "site-packages", "gradio", "__init__.py");
+            Directory.CreateDirectory(Path.GetDirectoryName(indexGradioPackage)!);
+            await File.WriteAllTextAsync(indexGradioPackage, string.Empty, Encoding.UTF8);
+            await File.WriteAllTextAsync(Path.Combine(analyzedIndexTtsRoot, ".venv", "pyvenv.cfg"), "version_info = 3.11.9\n", Encoding.UTF8);
+            Assert(!KnownRepositoryEnvironmentService.HasMissingEnvironment("index-tts/index-tts", "webui.py", analyzedIndexTtsRoot), "IndexTTS installed Gradio dependency is accepted", lines);
+
             var importedUpdateRoot = Path.Combine(testRoot, "imported-update-baseline");
             Directory.CreateDirectory(importedUpdateRoot);
             const string importedBaselineSha = "1234567890abcdef1234567890abcdef12345678";

@@ -4589,7 +4589,10 @@ internal sealed class LauncherForm : Form
                 profile.Arguments);
             if (!normalizedProfileArguments.Equals(profile.Arguments, StringComparison.Ordinal))
             {
-                profile = profile with { Arguments = normalizedProfileArguments };
+                profile = profile with
+                {
+                    Arguments = ExpandModelValue(normalizedProfileArguments, profile.WorkingDirectory, profile.Port)
+                };
             }
 
             var trust = InstalledPluginTrustValidator.Verify(definition, _trustedPublishers);

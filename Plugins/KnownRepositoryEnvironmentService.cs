@@ -5,14 +5,22 @@ namespace BaChenAiLauncher;
 internal static class KnownRepositoryEnvironmentService
 {
     private const string StableAudioRepository = "Stability-AI/stable-audio-3";
+    private const string IndexTtsRepository = "index-tts/index-tts";
 
     public static bool HasMissingEnvironment(string repository, string launchArguments, string rootDirectory)
-        => IsStableAudioGradio(repository, launchArguments) &&
+        => IsKnownGradioWebUi(repository, launchArguments) &&
            (!File.Exists(Path.Combine(rootDirectory, ".venv", "Lib", "site-packages", "gradio", "__init__.py")) ||
             !PythonEnvironmentService.IsEnvironmentCompatible(rootDirectory, GitHubRepositoryAnalyzer.ReadPythonConstraint(rootDirectory)));
 
     public static string NormalizeLaunchArguments(string repository, string launchArguments)
     {
+        if (IsIndexTtsWebUi(repository, launchArguments))
+        {
+            var indexArguments = Regex.Replace(launchArguments, @"\s+--host(?:\s+|=)\S+", string.Empty, RegexOptions.IgnoreCase);
+            indexArguments = Regex.Replace(indexArguments, @"\s+--port(?:\s+|=)\S+", string.Empty, RegexOptions.IgnoreCase).Trim();
+            return indexArguments + " --host 127.0.0.1 --port {port}";
+        }
+
         if (!IsStableAudioGradio(repository, launchArguments))
         {
             return launchArguments;
@@ -59,13 +67,20 @@ internal static class KnownRepositoryEnvironmentService
         await PythonEnvironmentService.EnsureRepositoryAsync(analysis, rootDirectory, dataRoot, httpClient, progress, cancellationToken);
         if (HasMissingEnvironment(repository, launchArguments, rootDirectory))
         {
-            throw new InvalidOperationException("Stable Audio 3 UI dependency installation completed, but the gradio package is still missing.");
+            throw new InvalidOperationException("WebUI dependency installation completed, but the gradio package is still missing.");
         }
     }
+
+    private static bool IsKnownGradioWebUi(string repository, string launchArguments)
+        => IsStableAudioGradio(repository, launchArguments) || IsIndexTtsWebUi(repository, launchArguments);
 
     private static bool IsStableAudioGradio(string repository, string launchArguments)
         => repository.Equals(StableAudioRepository, StringComparison.OrdinalIgnoreCase) &&
            launchArguments.Contains("run_gradio.py", StringComparison.OrdinalIgnoreCase);
+
+    private static bool IsIndexTtsWebUi(string repository, string launchArguments)
+        => repository.Equals(IndexTtsRepository, StringComparison.OrdinalIgnoreCase) &&
+           launchArguments.Contains("webui.py", StringComparison.OrdinalIgnoreCase);
 
     private static string GetStableAudioModel(string launchArguments)
     {
