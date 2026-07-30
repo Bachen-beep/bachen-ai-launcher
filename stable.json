@@ -1,13 +1,13 @@
 {
-  "Version": "0.16.17",
+  "Version": "0.16.18",
   "MinimumCompatibleVersion": "0.11.0",
-  "DownloadUrl": "https://github.com/Bachen-beep/bachen-ai-launcher/releases/download/v0.16.17/BaChen.AI.Launcher.exe",
-  "Sha256": "3CB57569B170ECB3E8E308B8FE8FB984BA92801CB9C0488E3DC0D1043D66088B",
-  "ReleaseNotesUrl": "https://github.com/Bachen-beep/bachen-ai-launcher/releases/tag/v0.16.17",
-  "PublishedAt": "2026-07-29T10:20:58.8076703+00:00",
+  "DownloadUrl": "https://github.com/Bachen-beep/bachen-ai-launcher/releases/download/v0.16.18/BaChen.AI.Launcher.exe",
+  "Sha256": "0B159EAFC0E31D55B1A30C5EB36EF24007FC7D353E8F4845E918F93F63653F71",
+  "ReleaseNotesUrl": "https://github.com/Bachen-beep/bachen-ai-launcher/releases/tag/v0.16.18",
+  "PublishedAt": "2026-07-30T02:48:27.8095774+00:00",
   "Signature": {
     "KeyId": "bachen-launcher-release-2026",
     "Algorithm": "RSA-SHA256",
-    "Value": "3Ans0qeZC\u002Bh/gG89fezerB2DtnngVJvlONTCpkuOIrZCEeRpPDwcI0uzXARwtQCGIn\u002B9mOR6h4JtXoIZQnEqdrxulnDclgYS8MsP0otBNlB1E9xdx\u002BN3luuLDfL/oTSXL4WV4XbRUu8UDlnD0Q17EDYOBH3bR/F4Kdoo4691N/UHgetY91isoRFVJSOuHz1J8ZeHRC0k0V6q01wzFc2NxHBi9pHB1N5Gvamhml7fW1\u002Bx1tvx0UfGIV/oQR8\u002BrARuyw9b\u002B0KHXQhka36r82f1rRAD1MO9XWdiyf8u\u002BCys8IYflELM4N7xvS3KzQTEBPah95oSY6cgx52YNrVcHwIKva3iRG8Amz0biiz\u002BWpFKjxpnXIEMb8a36QFdJ/wVimBAM9CYaZQNTsNRaxJPD1n2ptfFy3W1x5fYN02A\u002ByzIfJi1iTA3er54MlCtndS8oumjlkBzH7QY\u002BUOoYxFPXcq4cUNSe6GiTGLPNboRYsp9Lo3bZTXSXCVvCeRluTuK5F9m"
+    "Value": "Oi6Z6qbE6RMR\u002BuS4n50kNHJfUhJYZYmm1ZQ61rUnhITl8iaONr4cxijVAE74MU3/123U7DaVKfaAU7MWJ/1SGIyuyK9sYwPeh9dyYZvogr\u002BdGsFlDcHrPfHQ/Ps7KeTweN8iHHZxadrNV7OBJzv0kPSFz5X4Pi9PUfVwR\u002BBlFhlaBPgJWJVJerkICVKc3QFMUDagjAzM6YVnwzgHanJq4M/VEuCWc4xoFOmKI3hqn/D/8lUZh148snZDt4JtC4yrQjxlHXzR16qlhA4aWOl4iJUs8Y98JP8L8Dxug\u002Bh7t2EYUDa29XH5t/kQUAUeC/PptegYRDjDA0NX1qHAYCOYz7KAS7F337bG8WoOCtEpSZbotMbhBg0/8pBsf\u002Bw3WDM7KAliiMk6TfA4tyUvRiP0ZYPXCq1YttBhnxV/w/ZCTb0R0m0c/ACajq41GKJiPzz9gBr0fMyszgznWmxFz3Xj99z\u002BZkXI20zb0HGSn9En4izgQxZFr4j94SixuQ4coJmV"
   }
 }
