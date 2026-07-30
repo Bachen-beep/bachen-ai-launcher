@@ -1,13 +1,13 @@
 {
-  "Version": "0.16.20",
+  "Version": "0.16.21",
   "MinimumCompatibleVersion": "0.11.0",
-  "DownloadUrl": "https://github.com/Bachen-beep/bachen-ai-launcher/releases/download/v0.16.20/BaChen.AI.Launcher.exe",
-  "Sha256": "F6D01933E338C7EDD88419919673FC12A234A6D27A41258F3D4525C2CBD49F8D",
-  "ReleaseNotesUrl": "https://github.com/Bachen-beep/bachen-ai-launcher/releases/tag/v0.16.20",
-  "PublishedAt": "2026-07-30T04:06:53.9656748+00:00",
+  "DownloadUrl": "https://github.com/Bachen-beep/bachen-ai-launcher/releases/download/v0.16.21/BaChen.AI.Launcher.exe",
+  "Sha256": "39A77A33D1EAECDE1CEC888F815CD0E401E27FA5067F0974A75ACB892654BE52",
+  "ReleaseNotesUrl": "https://github.com/Bachen-beep/bachen-ai-launcher/releases/tag/v0.16.21",
+  "PublishedAt": "2026-07-30T08:12:26.3166846+00:00",
   "Signature": {
     "KeyId": "bachen-launcher-release-2026",
     "Algorithm": "RSA-SHA256",
-    "Value": "IVVSasKJBe6nvlFLUSw9Xa68D0yyZeGcrqZRf5qXH482901WXdtYnr59TNotKc3yBS0etNL\u002BpfaHzIQNq2l3g9UmaCR3hzM56euey2F57n11YKdQ58bopa1U4eC\u002BVHO\u002By5NzZ5LhGn7HluMmxb4L5drr\u002BgQ9i//ONsdFgQgus8vwnWX\u002BuHLLGV4pvzn7M05lsip4akMJrJ/wcWi2INmBjXpqWJr7q0PxwZRQum0x1pnsW2gRJJ194F5mogs1DG4ctkgdjHuyBkZWEy9f9xQGElZ07IgHEPvdg5k\u002BRNncVLppPSpK5TmbF8gx5lGVpCsuXHtWX5Aoa84Spxk1lXO\u002B8B35WPiQbOGtfoKO4pn\u002BlyPUxDx\u002BhUbpgiQuNaVd1avOOIqiAB5k\u002BehQPp/sPU11GqI3ZfDA9zSGtDP8F4/LfCwU7a3ykDTYkIW9Op5KrazL/z0heJUHJDxEcH2\u002Bo\u002B/X3W8PHZdDmvfryYTE8KHrCiu2yTbd73cEa4zC8qwJT/FP"
+    "Value": "FxAk2jFw/7MiZcK6okCspnyytgpahnwnjJGrj9oexMOtm7bFwzRnTj/d7TXccPZiRWo6Cgg1n57lVoRiJ5Yr4UWTiB2miMsYrIl3rU9CVwdWLkcSnU9wFodu7MWcVvcpu8YbWLIyYaE8C6KsWeSpwaW1gNhaQrKEJ3lVnJN48Nr4CQN44Jirgu6LVn/qeWtiTdcY2iQfLTkE1pbqZkcjKic9onJGCjDxCyyIlwYHMGKKPPj9m1NyueBv4zPP/1\u002B3SjyBMFSl4FYGKQndrfG3ERCXPS4MUn1kxjlGZtBBUQHwfiC4RzLKNykjO4OZGJenh\u002BHOPGTqEL3/it4Gn//Y9dp3v7yhN73QF0y0DlEX1JwrriuKVsBDzc2FA98n/YkWD/\u002BhudpvpZaj7/gMz9y/Ut/BExbrFHkodeN867\u002B6OY4VzTk\u002BliaECxFq22BrN8bXbSGrA04uWZKAZ7a\u002BrMcdyQzUmdaC559VKH5WSekS4/N0WC2MyvFbJCBdfn46yUgn"
   }
 }
