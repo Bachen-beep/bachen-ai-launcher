@@ -1,13 +1,13 @@
 {
-  "Version": "0.16.19",
+  "Version": "0.16.20",
   "MinimumCompatibleVersion": "0.11.0",
-  "DownloadUrl": "https://github.com/Bachen-beep/bachen-ai-launcher/releases/download/v0.16.19/BaChen.AI.Launcher.exe",
-  "Sha256": "017BAECDE5FC481824024F55C02946BC1A7CB6601968F97BB096C16C7A428905",
-  "ReleaseNotesUrl": "https://github.com/Bachen-beep/bachen-ai-launcher/releases/tag/v0.16.19",
-  "PublishedAt": "2026-07-30T03:14:37.074217+00:00",
+  "DownloadUrl": "https://github.com/Bachen-beep/bachen-ai-launcher/releases/download/v0.16.20/BaChen.AI.Launcher.exe",
+  "Sha256": "F6D01933E338C7EDD88419919673FC12A234A6D27A41258F3D4525C2CBD49F8D",
+  "ReleaseNotesUrl": "https://github.com/Bachen-beep/bachen-ai-launcher/releases/tag/v0.16.20",
+  "PublishedAt": "2026-07-30T04:06:53.9656748+00:00",
   "Signature": {
     "KeyId": "bachen-launcher-release-2026",
     "Algorithm": "RSA-SHA256",
-    "Value": "8CD129eu21Y5GH6BvzBXjoPWTlYdo3Rj46MD7soLHyAHlNIi98WtIXkeDY6fODLcHhvkEzPda8wR80iLNkNzv/kpxOWzE941FfNgwXMDywcQjVtK7EKQ79igyaOUeRXpk8iV4lJHs3DsOgfnBs3vPVq2Jxx0nq8er7vaUmi\u002BNIECCk7k12mtckFJP5UNN5N58iQOXR8aDTj7c4zsSnI6KMmcKreQNaE\u002B\u002B1pCIlzka8AljD86ksOWM2oZG\u002Bh1rs1/9v92KVdSKiw3faXxS7MEyuXCvo0oLElejKs/iQJN4loE7uA6zeCupUU3yVmwBqcUSQDf8Gix1vJZ27tzgB\u002BV1SshdGLhtl7rCN2\u002BRDhN6ycpFTYriT1/5\u002B3Rl0WgQf4CmFrEXUdeqlysRb5jjRZvcrKZH4nLEB8g0CLAi98zQLjg/1SV2fTgULbvozHDZC5vog1RQTtpI0kUv9I3GVhP1IGr\u002BAYC/OE8IjWhyOjSsxmKz2IIhUgKbbwOytiqtXYq"
+    "Value": "IVVSasKJBe6nvlFLUSw9Xa68D0yyZeGcrqZRf5qXH482901WXdtYnr59TNotKc3yBS0etNL\u002BpfaHzIQNq2l3g9UmaCR3hzM56euey2F57n11YKdQ58bopa1U4eC\u002BVHO\u002By5NzZ5LhGn7HluMmxb4L5drr\u002BgQ9i//ONsdFgQgus8vwnWX\u002BuHLLGV4pvzn7M05lsip4akMJrJ/wcWi2INmBjXpqWJr7q0PxwZRQum0x1pnsW2gRJJ194F5mogs1DG4ctkgdjHuyBkZWEy9f9xQGElZ07IgHEPvdg5k\u002BRNncVLppPSpK5TmbF8gx5lGVpCsuXHtWX5Aoa84Spxk1lXO\u002B8B35WPiQbOGtfoKO4pn\u002BlyPUxDx\u002BhUbpgiQuNaVd1avOOIqiAB5k\u002BehQPp/sPU11GqI3ZfDA9zSGtDP8F4/LfCwU7a3ykDTYkIW9Op5KrazL/z0heJUHJDxEcH2\u002Bo\u002B/X3W8PHZdDmvfryYTE8KHrCiu2yTbd73cEa4zC8qwJT/FP"
   }
 }
