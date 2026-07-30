@@ -14,6 +14,7 @@ redistributing a plugin or model.
 | Woosh-DFlow | SonyResearch/Woosh | MIT source license, Apache-2.0 components, and Freesound CC BY 3.0/4.0 attribution list | Do not bundle. Preserve all upstream notices when installed or redistributed. |
 | Stable Audio 3 integration | Stability-AI/stable-audio-tools | Local integration source is MIT. Model weights and hosted model cards may have separate Stability AI terms. | Do not bundle source, environments, samples, or weights. Require the user to obtain model access separately. |
 | IndexTTS2 | index-tts/index-tts | bilibili Model Use License Agreement applies to the model and published code in the inspected local tree. It includes downstream, attribution, scale, prohibited-use, and compliance conditions. | Do not bundle. Show the upstream terms before any future guided download or installation. |
+| Managed Python | Python Software Foundation NuGet packages | Python Software Foundation License applies to the downloaded CPython runtime. | Do not bundle. Download the pinned package from NuGet, verify SHA-256, and install it only in the user-selected launcher data directory. |
 
 The launcher uses the Microsoft .NET runtime when published as a self-contained
 Windows executable. Applicable Microsoft notices are supplied by the .NET

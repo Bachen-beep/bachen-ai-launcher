@@ -57,6 +57,11 @@ jobs:
           dotnet ".\bin\Release\net10.0-windows\BaChen AI Launcher.dll" --self-test $report
           if ($LASTEXITCODE -ne 0) { Get-Content $report; exit $LASTEXITCODE }
           Get-Content $report
+          $managedPythonRoot = Join-Path $env:RUNNER_TEMP "managed-python-smoke"
+          $managedPythonReport = Join-Path $env:RUNNER_TEMP "managed-python-smoke.txt"
+          dotnet ".\bin\Release\net10.0-windows\BaChen AI Launcher.dll" --self-test-managed-python $managedPythonRoot $managedPythonReport
+          if ($LASTEXITCODE -ne 0) { Get-Content $managedPythonReport; exit $LASTEXITCODE }
+          Get-Content $managedPythonReport
           .\scripts\Publish.ps1
 
       - name: Restore Authenticode certificate

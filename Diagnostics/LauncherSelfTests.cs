@@ -8,6 +8,40 @@ namespace BaChenAiLauncher;
 
 internal static class LauncherSelfTests
 {
+    public static async Task<int> RunManagedPythonSmokeTestAsync(string dataRoot, string reportPath)
+    {
+        var lines = new List<string>();
+        try
+        {
+            Directory.CreateDirectory(dataRoot);
+            using var client = new HttpClient { Timeout = TimeSpan.FromMinutes(5) };
+            client.DefaultRequestHeaders.UserAgent.ParseAdd("BaChen-Managed-Python-Smoke-Test");
+            var service = new ManagedPythonRuntimeService(client);
+            foreach (var runtime in ManagedPythonRuntimeService.Supported)
+            {
+                var python = await service.EnsureAsync(runtime.Id, dataRoot);
+                lines.Add($"PASS: Installed portable Python {runtime.Version} at {python}");
+                var environment = Path.Combine(dataRoot, "smoke-environments", runtime.Id);
+                await RunCheckedProcessAsync(python, ["-m", "venv", environment], dataRoot);
+                var environmentPython = Path.Combine(environment, "Scripts", "python.exe");
+                await RunCheckedProcessAsync(
+                    environmentPython,
+                    ["-c", "import pip, sys, venv; print(sys.version); print(pip.__version__)"],
+                    dataRoot);
+                lines.Add($"PASS: Portable Python {runtime.Version} creates a venv with pip");
+            }
+            lines.Add("MANAGED PYTHON SMOKE TEST PASSED");
+            await WriteReportAsync(reportPath, lines);
+            return 0;
+        }
+        catch (Exception ex)
+        {
+            lines.Add("FAIL: " + ex);
+            await WriteReportAsync(reportPath, lines);
+            return 1;
+        }
+    }
+
     public static async Task<int> WriteCanonicalManifestPayloadAsync(string manifestPath, string outputPath)
     {
         try
@@ -307,12 +341,25 @@ internal static class LauncherSelfTests
                 Assert(preflight.RequiredDiskBytes >= (versionSixManifest.PackageSizeBytes + assetBytes.Length) * 2, "Asset packages included in disk preflight", lines);
             }
             Assert(ManagedPythonRuntimeService.Python311.Id == "python-3.11.9-x64" &&
-                ManagedPythonRuntimeService.Python311.SizeBytes == 26216840 &&
-                ManagedPythonRuntimeService.Python311.Sha256 == "5EE42C4EEE1E6B4464BB23722F90B45303F79442DF63083F05322F1785F5FDDE" &&
+                ManagedPythonRuntimeService.Python311.Url.EndsWith("python.3.11.9.nupkg", StringComparison.Ordinal) &&
+                ManagedPythonRuntimeService.Python311.SizeBytes == 17478009 &&
+                ManagedPythonRuntimeService.Python311.Sha256 == "9283876D58C017E0E846F95B490DA3BCA0FC0A6EE1134B2870677CFB7EEC3C67" &&
                 ManagedPythonRuntimeService.Python312.Id == "python-3.12.10-x64" &&
-                ManagedPythonRuntimeService.Python312.SizeBytes == 26964224 &&
-                ManagedPythonRuntimeService.Python312.Sha256 == "67B5635E80EA51072B87941312D00EC8927C4DB9BA18938F7AD2D27B328B95FB",
-                "Managed Python runtimes are pinned by version size and SHA-256", lines);
+                ManagedPythonRuntimeService.Python312.Url.EndsWith("python.3.12.10.nupkg", StringComparison.Ordinal) &&
+                ManagedPythonRuntimeService.Python312.SizeBytes == 14515433 &&
+                ManagedPythonRuntimeService.Python312.Sha256 == "0EB85C2DFCCCCF1B17352DE4C397F69194035B7D37149EACC16F1147D93DE3B8",
+                "Portable managed Python runtimes are pinned by version size and SHA-256", lines);
+            var portablePackage = Path.Combine(testRoot, "portable-python.nupkg");
+            using (var archive = ZipFile.Open(portablePackage, ZipArchiveMode.Create))
+            {
+                var pythonEntry = archive.CreateEntry("tools/python.exe");
+                await using var pythonStream = pythonEntry.Open();
+                await pythonStream.WriteAsync("fixture"u8.ToArray());
+            }
+            var portableStaging = Path.Combine(testRoot, "portable-python-staging");
+            Directory.CreateDirectory(portableStaging);
+            var extractedPortableRoot = ManagedPythonRuntimeService.ExtractPortablePackage(portablePackage, portableStaging);
+            Assert(File.Exists(Path.Combine(extractedPortableRoot, "python.exe")), "Portable managed Python package extraction", lines);
             Assert(ManagedPythonRuntimeService.SelectForConstraint(">=3.10,<3.12") == ManagedPythonRuntimeService.Python311, "Python 3.11 selected for upper-bounded repository", lines);
             Assert(ManagedPythonRuntimeService.SelectForConstraint(">=3.12") == ManagedPythonRuntimeService.Python312, "Python 3.12 selected for modern repository", lines);
             Assert(ManagedPythonRuntimeService.SatisfiesConstraint(new Version(3, 11, 9), ">=3.10,<3.12") &&
@@ -809,6 +856,30 @@ internal static class LauncherSelfTests
         var fullPath = Path.GetFullPath(reportPath);
         Directory.CreateDirectory(Path.GetDirectoryName(fullPath)!);
         await File.WriteAllLinesAsync(fullPath, lines, Encoding.UTF8);
+    }
+
+    private static async Task RunCheckedProcessAsync(string executable, IEnumerable<string> arguments, string workingDirectory)
+    {
+        var startInfo = new ProcessStartInfo(executable)
+        {
+            WorkingDirectory = workingDirectory,
+            UseShellExecute = false,
+            CreateNoWindow = true,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true
+        };
+        foreach (var argument in arguments)
+        {
+            startInfo.ArgumentList.Add(argument);
+        }
+        using var process = Process.Start(startInfo) ?? throw new InvalidOperationException($"Could not start {executable}.");
+        var output = process.StandardOutput.ReadToEndAsync();
+        var error = process.StandardError.ReadToEndAsync();
+        await process.WaitForExitAsync();
+        if (process.ExitCode != 0)
+        {
+            throw new InvalidOperationException($"Process failed ({process.ExitCode}): {executable}\n{await error}\n{await output}".Trim());
+        }
     }
 
     private sealed class StaticJsonHandler(string json) : HttpMessageHandler

@@ -18,6 +18,10 @@ internal static class Program
         {
             return LauncherSelfTests.RunAsync(args[1]).GetAwaiter().GetResult();
         }
+        if (args.Length >= 3 && args[0].Equals("--self-test-managed-python", StringComparison.OrdinalIgnoreCase))
+        {
+            return LauncherSelfTests.RunManagedPythonSmokeTestAsync(args[1], args[2]).GetAwaiter().GetResult();
+        }
         if (args.Length >= 3 && args[0].Equals("--canonicalize-manifest", StringComparison.OrdinalIgnoreCase))
         {
             return LauncherSelfTests.WriteCanonicalManifestPayloadAsync(args[1], args[2]).GetAwaiter().GetResult();
