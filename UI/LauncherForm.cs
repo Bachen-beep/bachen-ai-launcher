@@ -4325,7 +4325,7 @@ internal sealed class LauncherForm : Form
         var checkUpdatesButton = CreateActionButton(L("检查更新", "Check updates"), Color.FromArgb(40, 108, 126), 164);
         checkUpdatesButton.Location = new Point(946, 23);
         checkUpdatesButton.Click += async (_, _) => await CheckUpdatesAsync();
-        var updateSourcesButton = CreateActionButton(L("更新源码", "Update source"), Color.FromArgb(170, 102, 49), 176);
+        var updateSourcesButton = CreateActionButton(L("更新插件源码", "Update plugin source"), Color.FromArgb(170, 102, 49), 176);
         updateSourcesButton.Location = new Point(1122, 23);
         updateSourcesButton.Click += async (_, _) => await UpdateSourcesAsync();
         controlRow.Controls.Add(stopButton);
@@ -4415,7 +4415,7 @@ internal sealed class LauncherForm : Form
 
         void ApplyResponsiveLayout()
         {
-            var width = Math.Max(1000, canvas.ClientSize.Width);
+            var width = Math.Max(760, canvas.ClientSize.Width);
             content.Location = Point.Empty;
             content.Width = width;
             header.Width = width;
@@ -4448,13 +4448,22 @@ internal sealed class LauncherForm : Form
             models.Height = rows * 216 + 8;
             workspace.Height = models.Top + models.Height + 14;
 
-            var actionGroupWidth = stopButton.Width + refreshButton.Width + _openButton.Width + checkUpdatesButton.Width + updateSourcesButton.Width + 48;
-            var actionStart = Math.Max(340, width - actionGroupWidth - 44);
-            stopButton.Left = actionStart;
-            refreshButton.Left = stopButton.Right + 12;
-            _openButton.Left = refreshButton.Right + 12;
-            checkUpdatesButton.Left = _openButton.Right + 12;
-            updateSourcesButton.Left = checkUpdatesButton.Right + 12;
+            var controlLayout = ServiceControlLayoutPlanner.Calculate(
+                width,
+                stopButton.Width,
+                refreshButton.Width,
+                _openButton.Width,
+                checkUpdatesButton.Width,
+                updateSourcesButton.Width);
+            controlRow.Height = controlLayout.Height;
+            controlTitle.Visible = controlLayout.ShowLabels;
+            controlSubtitle.Visible = controlLayout.ShowLabels;
+            stopButton.Location = controlLayout.StopButton;
+            refreshButton.Location = controlLayout.RefreshButton;
+            _openButton.Location = controlLayout.OpenButton;
+            checkUpdatesButton.Location = controlLayout.CheckUpdatesButton;
+            updateSourcesButton.Location = controlLayout.UpdateSourceButton;
+            _statusLabel.Location = controlLayout.StatusLabel;
             _statusLabel.Width = width - 62;
             liveOutputLabel.Left = width - liveOutputLabel.Width - 35;
             copyLogsButton.Left = liveOutputLabel.Left - copyLogsButton.Width - 12;

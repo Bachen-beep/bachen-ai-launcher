@@ -66,6 +66,9 @@ internal static class LauncherSelfTests
         try
         {
             Directory.CreateDirectory(testRoot);
+            AssertServiceControlLayout(760, lines);
+            AssertServiceControlLayout(950, lines);
+            AssertServiceControlLayout(1240, lines);
             var packageSource = Path.Combine(testRoot, "package-source");
             Directory.CreateDirectory(packageSource);
             await File.WriteAllTextAsync(Path.Combine(packageSource, "start.cmd"), "@echo off\r\nexit /b 0\r\n", Encoding.ASCII);
@@ -779,6 +782,25 @@ internal static class LauncherSelfTests
                 Directory.Delete(testRoot, true);
             }
         }
+    }
+
+    private static void AssertServiceControlLayout(int width, List<string> lines)
+    {
+        const int stopWidth = 190;
+        const int refreshWidth = 160;
+        const int openWidth = 200;
+        const int checkWidth = 164;
+        const int updateWidth = 176;
+        var layout = ServiceControlLayoutPlanner.Calculate(width, stopWidth, refreshWidth, openWidth, checkWidth, updateWidth);
+        var buttons = new[]
+        {
+            (layout.StopButton, stopWidth),
+            (layout.RefreshButton, refreshWidth),
+            (layout.OpenButton, openWidth),
+            (layout.CheckUpdatesButton, checkWidth),
+            (layout.UpdateSourceButton, updateWidth)
+        };
+        Assert(buttons.All(button => button.Item1.X >= 0 && button.Item1.X + button.Item2 <= width), $"Service controls remain visible at {width}px", lines);
     }
 
     private static ServiceProfile ToServiceProfileForSelfTest(this LauncherModelDefinition definition)
