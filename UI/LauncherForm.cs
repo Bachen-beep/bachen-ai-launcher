@@ -3866,30 +3866,30 @@ internal sealed class LauncherForm : Form
         if (_medium is not null) AddStableModeButton(_stableModePanel, "medium", _medium);
         detailPanel.Controls.Add(_stableModePanel);
 
-        _detailPrimaryButton = CreateActionButton(L("启动插件", "Launch plugin"), Theme.DeepTeal, 170);
+        _detailPrimaryButton = CreateActionButton(L("启动插件", "Launch plugin"), Theme.DeepTeal, 115);
         _detailPrimaryButton.Location = new Point(30, 466);
         _detailPrimaryButton.Height = 42;
         _detailPrimaryButton.Click += (_, _) => HandlePrimaryPluginAction();
         _openButton = _detailPrimaryButton;
-        _detailUpdateButton = CreateActionButton(L("更新插件", "Update plugin"), Color.FromArgb(170, 102, 49), 150);
-        _detailUpdateButton.Location = new Point(210, 466);
+        _detailUpdateButton = CreateActionButton(L("更新插件", "Update plugin"), Color.FromArgb(170, 102, 49), 115);
+        _detailUpdateButton.Location = new Point(155, 466);
         _detailUpdateButton.Height = 42;
         _detailUpdateButton.Visible = false;
         _detailUpdateButton.Click += async (_, _) => await UpdateSelectedPluginAsync();
-        var stopButton = CreateActionButton(L("停止当前 AI", "Stop active AI"), Theme.Coral, 130);
-        stopButton.Location = new Point(210, 466);
+        var stopButton = CreateActionButton(L("停止AI", "Stop AI"), Theme.Coral, 115);
+        stopButton.Location = new Point(155, 466);
         stopButton.Height = 42;
         stopButton.Click += (_, _) => StopKnownServices();
         _detailStopButton = stopButton;
-        _detailUninstallButton = CreateActionButton(L("卸载插件", "Uninstall"), Color.FromArgb(96, 99, 108), 140);
-        _detailUninstallButton.Location = new Point(350, 466);
+        _detailUninstallButton = CreateActionButton(L("卸载插件", "Uninstall"), Color.FromArgb(96, 99, 108), 115);
+        _detailUninstallButton.Location = new Point(405, 466);
         _detailUninstallButton.Height = 42;
         _detailUninstallButton.Click += async (_, _) => await UninstallSelectedPluginAsync();
         detailPanel.Controls.Add(_detailPrimaryButton);
         detailPanel.Controls.Add(_detailUpdateButton);
         detailPanel.Controls.Add(stopButton);
         detailPanel.Controls.Add(_detailUninstallButton);
-        _detailUpdateProgress = new ProgressBar { Location = new Point(190, 532), Size = new Size(300, 8), Minimum = 0, Maximum = 100, Visible = false };
+        _detailUpdateProgress = new ProgressBar { Location = new Point(30, 520), Size = new Size(490, 8), Minimum = 0, Maximum = 100, Visible = false };
         detailPanel.Controls.Add(_detailUpdateProgress);
         _detailActionHint = CreateParagraph(L("模型启动后，主按钮会自动切换为打开 WebUI。", "The primary action changes to Open WebUI when the service is ready."), new Rectangle(30, 520, 500, 45), 8.5F, Theme.Muted, FontStyle.Regular);
         detailPanel.Controls.Add(_detailActionHint);
@@ -4195,17 +4195,17 @@ internal sealed class LauncherForm : Form
         }
         if (_detailStopButton is not null)
         {
-            _detailStopButton.Location = sourceUpdateAvailable ? new Point(370, 466) : new Point(210, 466);
+            _detailStopButton.Location = sourceUpdateAvailable ? new Point(280, 466) : new Point(155, 466);
         }
         if (_detailUninstallButton is not null)
         {
-            _detailUninstallButton.Location = sourceUpdateAvailable ? new Point(30, 516) : new Point(350, 466);
+            _detailUninstallButton.Location = sourceUpdateAvailable ? new Point(405, 466) : new Point(280, 466);
             _detailUninstallButton.Enabled = selectedState is not (ServiceRuntimeState.Checking or ServiceRuntimeState.Starting or ServiceRuntimeState.Stopping or ServiceRuntimeState.Updating);
             _detailUninstallButton.Invalidate();
         }
         if (_detailActionHint is not null)
         {
-            _detailActionHint.Bounds = sourceUpdateAvailable ? new Rectangle(30, 566, 500, 38) : new Rectangle(30, 520, 500, 45);
+            _detailActionHint.Bounds = sourceUpdateAvailable ? new Rectangle(30, 538, 500, 38) : new Rectangle(30, 520, 500, 45);
         }
         if (_detailUpdateProgress is not null)
         {
