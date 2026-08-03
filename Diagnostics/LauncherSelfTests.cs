@@ -69,6 +69,7 @@ internal static class LauncherSelfTests
             AssertServiceControlLayout(760, lines);
             AssertServiceControlLayout(950, lines);
             AssertServiceControlLayout(1240, lines);
+            AssertPluginUpdateActionLayout(lines);
             var packageSource = Path.Combine(testRoot, "package-source");
             Directory.CreateDirectory(packageSource);
             await File.WriteAllTextAsync(Path.Combine(packageSource, "start.cmd"), "@echo off\r\nexit /b 0\r\n", Encoding.ASCII);
@@ -822,6 +823,22 @@ internal static class LauncherSelfTests
             (layout.UpdateSourceButton, updateWidth)
         };
         Assert(buttons.All(button => button.Item1.X >= 0 && button.Item1.X + button.Item2 <= width), $"Service controls remain visible at {width}px", lines);
+    }
+
+    private static void AssertPluginUpdateActionLayout(List<string> lines)
+    {
+        var actionRects = new[]
+        {
+            new Rectangle(30, 466, 170, 42),
+            new Rectangle(210, 466, 150, 42),
+            new Rectangle(370, 466, 130, 42),
+            new Rectangle(30, 516, 140, 42),
+            new Rectangle(190, 532, 300, 8),
+            new Rectangle(30, 566, 500, 38)
+        };
+        Assert(actionRects.All(rectangle => rectangle.Left >= 0 && rectangle.Right <= 530), "Plugin update actions fit the detail panel", lines);
+        Assert(actionRects.SelectMany((left, index) => actionRects.Skip(index + 1).Select(right => (left, right))).All(pair => !pair.left.IntersectsWith(pair.right)), "Plugin update actions do not overlap", lines);
+        Assert(180 < 330, "Launcher update progress indicator remains compact", lines);
     }
 
     private static ServiceProfile ToServiceProfileForSelfTest(this LauncherModelDefinition definition)

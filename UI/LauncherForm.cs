@@ -3546,7 +3546,7 @@ internal sealed class LauncherForm : Form
         _phaseLabel.Text = L(_phaseChinese, _phaseEnglish);
         header.Controls.Add(_phaseLabel);
 
-        _launcherUpdateProgress.Bounds = new Rectangle(380, 61, 330, 9);
+        _launcherUpdateProgress.Bounds = new Rectangle(380, 63, 180, 7);
         _launcherUpdateProgress.Minimum = 0;
         _launcherUpdateProgress.Maximum = 100;
         _launcherUpdateProgress.Style = ProgressBarStyle.Continuous;
@@ -3586,7 +3586,7 @@ internal sealed class LauncherForm : Form
             gpuPanel.Top = 15;
             _phaseLabel.Width = Math.Max(230, gpuPanel.Left - _phaseLabel.Left - 24);
             _launcherUpdateProgress.Left = _phaseLabel.Left;
-            _launcherUpdateProgress.Width = _phaseLabel.Width;
+            _launcherUpdateProgress.Width = Math.Min(180, _phaseLabel.Width);
         }
         header.SizeChanged += (_, _) => LayoutHeader();
 
@@ -3889,7 +3889,7 @@ internal sealed class LauncherForm : Form
         detailPanel.Controls.Add(_detailUpdateButton);
         detailPanel.Controls.Add(stopButton);
         detailPanel.Controls.Add(_detailUninstallButton);
-        _detailUpdateProgress = new ProgressBar { Location = new Point(180, 534), Size = new Size(310, 8), Minimum = 0, Maximum = 100, Visible = false };
+        _detailUpdateProgress = new ProgressBar { Location = new Point(190, 532), Size = new Size(300, 8), Minimum = 0, Maximum = 100, Visible = false };
         detailPanel.Controls.Add(_detailUpdateProgress);
         _detailActionHint = CreateParagraph(L("模型启动后，主按钮会自动切换为打开 WebUI。", "The primary action changes to Open WebUI when the service is ready."), new Rectangle(30, 520, 500, 45), 8.5F, Theme.Muted, FontStyle.Regular);
         detailPanel.Controls.Add(_detailActionHint);
@@ -4205,7 +4205,7 @@ internal sealed class LauncherForm : Form
         }
         if (_detailActionHint is not null)
         {
-            _detailActionHint.Bounds = sourceUpdateAvailable ? new Rectangle(30, 550, 500, 45) : new Rectangle(30, 520, 500, 45);
+            _detailActionHint.Bounds = sourceUpdateAvailable ? new Rectangle(30, 566, 500, 38) : new Rectangle(30, 520, 500, 45);
         }
         if (_detailUpdateProgress is not null)
         {
