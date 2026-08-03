@@ -806,6 +806,7 @@ internal sealed class LauncherForm : Form
 
     private readonly SafeTextLabel _statusLabel = new();
     private readonly SafeTextLabel _phaseLabel = new();
+    private readonly ProgressBar _launcherUpdateProgress = new();
     private readonly RichTextBox _log = new();
     private readonly List<LauncherLogEntry> _logEntries = [];
     private readonly Dictionary<string, ServiceRuntimeState> _runtimeStates = new(StringComparer.OrdinalIgnoreCase);
@@ -1489,11 +1490,43 @@ internal sealed class LauncherForm : Form
 
     private async Task InstallLauncherUpdateAsync(LauncherUpdateCheck check)
     {
+            ShowLauncherUpdateProgress();
             SetRuntimePhase("正在下载并校验启动器", "Downloading and verifying launcher");
-            var packagePath = await _launcherUpdateService.DownloadVerifiedAsync(check.Manifest);
+            var progress = new Progress<LauncherUpdateProgress>(UpdateLauncherUpdateProgress);
+            var packagePath = await _launcherUpdateService.DownloadVerifiedAsync(check.Manifest, progress);
+            UpdateLauncherUpdateProgress(new LauncherUpdateProgress(LauncherUpdateProgressStage.Verifying, 1, 1));
             AppendLog(L($"启动器 {check.LatestVersion.ToString(3)} 校验通过，准备重启。", $"Launcher {check.LatestVersion.ToString(3)} verified; preparing to restart."));
             LauncherSelfUpdateService.BeginApply(packagePath, check.Manifest);
             Application.Exit();
+    }
+
+    private void ShowLauncherUpdateProgress()
+    {
+        _launcherUpdateProgress.Value = 0;
+        _launcherUpdateProgress.Style = ProgressBarStyle.Marquee;
+        _launcherUpdateProgress.MarqueeAnimationSpeed = 28;
+        _launcherUpdateProgress.Visible = true;
+    }
+
+    private void UpdateLauncherUpdateProgress(LauncherUpdateProgress progress)
+    {
+        var totalBytes = progress.TotalBytes.GetValueOrDefault();
+        if (totalBytes <= 0)
+        {
+            _launcherUpdateProgress.Style = ProgressBarStyle.Marquee;
+            return;
+        }
+
+        var completed = Math.Clamp(progress.CompletedBytes, 0, totalBytes);
+        var sourcePercent = (int)Math.Round(completed * 100D / totalBytes, MidpointRounding.AwayFromZero);
+        var progressValue = progress.Stage == LauncherUpdateProgressStage.Downloading
+            ? Math.Min(85, (int)Math.Round(sourcePercent * 0.85D, MidpointRounding.AwayFromZero))
+            : 85 + (int)Math.Round(sourcePercent * 0.15D, MidpointRounding.AwayFromZero);
+        _launcherUpdateProgress.Style = ProgressBarStyle.Continuous;
+        _launcherUpdateProgress.Value = Math.Clamp(progressValue, 0, 100);
+        _phaseLabel.Text = progress.Stage == LauncherUpdateProgressStage.Downloading
+            ? L($"正在下载并校验启动器（下载 {sourcePercent}%）", $"Downloading and verifying launcher ({sourcePercent}% downloaded)")
+            : L($"正在下载并校验启动器（校验 {sourcePercent}%）", $"Downloading and verifying launcher ({sourcePercent}% verified)");
     }
 
     private async Task<LauncherUpdateCheck> CheckLauncherVersionFromAllSourcesAsync()
@@ -3383,6 +3416,13 @@ internal sealed class LauncherForm : Form
         _phaseLabel.Text = L(_phaseChinese, _phaseEnglish);
         header.Controls.Add(_phaseLabel);
 
+        _launcherUpdateProgress.Bounds = new Rectangle(380, 61, 330, 9);
+        _launcherUpdateProgress.Minimum = 0;
+        _launcherUpdateProgress.Maximum = 100;
+        _launcherUpdateProgress.Style = ProgressBarStyle.Continuous;
+        _launcherUpdateProgress.Visible = false;
+        header.Controls.Add(_launcherUpdateProgress);
+
         var gpuPanel = new Panel { Size = new Size(400, 54), BackColor = Theme.DeepTeal };
         _gpuNameLabel = CreateText(L("正在检测 GPU", "Detecting GPU"), new Rectangle(0, 2, 226, 21), 8F, Color.FromArgb(166, 221, 210), FontStyle.Bold);
         gpuPanel.Controls.Add(_gpuNameLabel);
@@ -3415,6 +3455,8 @@ internal sealed class LauncherForm : Form
             gpuPanel.Left = toolsButton.Left - gpuPanel.Width - 24;
             gpuPanel.Top = 15;
             _phaseLabel.Width = Math.Max(230, gpuPanel.Left - _phaseLabel.Left - 24);
+            _launcherUpdateProgress.Left = _phaseLabel.Left;
+            _launcherUpdateProgress.Width = _phaseLabel.Width;
         }
         header.SizeChanged += (_, _) => LayoutHeader();
 

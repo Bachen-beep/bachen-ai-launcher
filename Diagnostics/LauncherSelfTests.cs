@@ -276,6 +276,27 @@ internal static class LauncherSelfTests
             }
             Assert(!Directory.Exists(interruptedRoot), "Interrupted update staging cleanup", lines);
 
+            var verifiedUpdateBytes = Enumerable.Range(0, 1024 * 1024).Select(index => (byte)(index % 251)).ToArray();
+            var verifiedUpdateManifest = new LauncherUpdateManifest
+            {
+                Version = "99.0.1",
+                DownloadUrl = "https://updates.example/BaChen.AI.Launcher.exe",
+                Sha256 = Convert.ToHexString(SHA256.HashData(verifiedUpdateBytes))
+            };
+            var updateProgress = new List<LauncherUpdateProgress>();
+            var verifiedUpdateRoot = Path.Combine(testRoot, "verified-update-download");
+            using (var verifiedUpdateClient = new HttpClient(new StaticBytesHandler(verifiedUpdateBytes)))
+            {
+                var verifiedUpdateService = new LauncherSelfUpdateService(verifiedUpdateClient);
+                var downloadedPath = await verifiedUpdateService.DownloadVerifiedAsync(
+                    verifiedUpdateManifest,
+                    verifiedUpdateRoot,
+                    new CallbackProgress<LauncherUpdateProgress>(updateProgress.Add));
+                Assert((await File.ReadAllBytesAsync(downloadedPath)).SequenceEqual(verifiedUpdateBytes), "Verified launcher update download", lines);
+            }
+            Assert(updateProgress.Any(progress => progress.Stage == LauncherUpdateProgressStage.Downloading && progress.CompletedBytes == verifiedUpdateBytes.Length), "Launcher update download progress completion", lines);
+            Assert(updateProgress.Any(progress => progress.Stage == LauncherUpdateProgressStage.Verifying && progress.CompletedBytes == verifiedUpdateBytes.Length), "Launcher update verification progress completion", lines);
+
             Assert(PluginManifestSignatureVerifier.Verify(manifest, publishers).IsTrusted, "Signed manifest verification", lines);
             Assert(manifest.SchemaVersion == 5 && manifest.RequiresLicenseAcceptance, "Plugin license metadata", lines);
             manifest.Description += " tampered";

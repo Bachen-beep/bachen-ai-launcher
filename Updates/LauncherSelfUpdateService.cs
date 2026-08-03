@@ -41,6 +41,17 @@ internal sealed class LauncherUpdateStaleException(Version highestObservedVersio
 
 internal sealed record LauncherUpdateSource(string Name, Uri Uri, bool IsReleaseApi = false);
 
+internal enum LauncherUpdateProgressStage
+{
+    Downloading,
+    Verifying
+}
+
+internal sealed record LauncherUpdateProgress(
+    LauncherUpdateProgressStage Stage,
+    long CompletedBytes,
+    long? TotalBytes);
+
 internal sealed class LauncherSelfUpdateService
 {
     public static readonly Uri DefaultManifestUri = new("https://github.com/Bachen-beep/bachen-ai-launcher/releases/latest/download/launcher-update.json");
@@ -257,10 +268,13 @@ internal sealed class LauncherSelfUpdateService
         throw new LauncherUpdateUnavailableException(LauncherUpdateChannel.Preview);
     }
 
-    public Task<string> DownloadVerifiedAsync(LauncherUpdateManifest manifest)
-        => DownloadVerifiedAsync(manifest, null);
+    public Task<string> DownloadVerifiedAsync(LauncherUpdateManifest manifest, IProgress<LauncherUpdateProgress>? progress = null)
+        => DownloadVerifiedAsync(manifest, null, progress);
 
-    internal async Task<string> DownloadVerifiedAsync(LauncherUpdateManifest manifest, string? updateRootOverride)
+    internal async Task<string> DownloadVerifiedAsync(
+        LauncherUpdateManifest manifest,
+        string? updateRootOverride,
+        IProgress<LauncherUpdateProgress>? progress = null)
     {
         var updateRoot = updateRootOverride ?? Path.Combine(Path.GetTempPath(), "bachen-launcher-update-" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(updateRoot);
@@ -269,19 +283,59 @@ internal sealed class LauncherSelfUpdateService
         {
             using var response = await client.GetAsync(manifest.DownloadUrl, HttpCompletionOption.ResponseHeadersRead);
             response.EnsureSuccessStatusCode();
-            var requiredBytes = response.Content.Headers.ContentLength ?? 150L * 1024 * 1024;
+            var contentLength = response.Content.Headers.ContentLength;
+            var requiredBytes = contentLength ?? 150L * 1024 * 1024;
             var drive = new DriveInfo(Path.GetPathRoot(updateRoot)!);
             if (drive.AvailableFreeSpace < requiredBytes + 100L * 1024 * 1024)
             {
                 throw new IOException($"Insufficient disk space. At least {(requiredBytes + 100L * 1024 * 1024) / 1024 / 1024} MiB must be available.");
             }
+            progress?.Report(new LauncherUpdateProgress(LauncherUpdateProgressStage.Downloading, 0, contentLength));
             await using (var input = await response.Content.ReadAsStreamAsync())
             await using (var output = File.Create(packagePath))
             {
-                await input.CopyToAsync(output);
+                var buffer = new byte[128 * 1024];
+                long downloadedBytes = 0;
+                var lastReportedBytes = 0L;
+                while (true)
+                {
+                    var read = await input.ReadAsync(buffer);
+                    if (read == 0)
+                    {
+                        break;
+                    }
+                    await output.WriteAsync(buffer.AsMemory(0, read));
+                    downloadedBytes += read;
+                    if (downloadedBytes - lastReportedBytes >= 256 * 1024 || contentLength == downloadedBytes)
+                    {
+                        progress?.Report(new LauncherUpdateProgress(LauncherUpdateProgressStage.Downloading, downloadedBytes, contentLength));
+                        lastReportedBytes = downloadedBytes;
+                    }
+                }
             }
             await using var package = File.OpenRead(packagePath);
-            var actual = Convert.ToHexString(await SHA256.HashDataAsync(package));
+            var packageLength = package.Length;
+            progress?.Report(new LauncherUpdateProgress(LauncherUpdateProgressStage.Verifying, 0, packageLength));
+            using var sha256 = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
+            var hashBuffer = new byte[128 * 1024];
+            long hashedBytes = 0;
+            var lastHashedReport = 0L;
+            while (true)
+            {
+                var read = await package.ReadAsync(hashBuffer);
+                if (read == 0)
+                {
+                    break;
+                }
+                sha256.AppendData(hashBuffer, 0, read);
+                hashedBytes += read;
+                if (hashedBytes - lastHashedReport >= 256 * 1024 || hashedBytes == packageLength)
+                {
+                    progress?.Report(new LauncherUpdateProgress(LauncherUpdateProgressStage.Verifying, hashedBytes, packageLength));
+                    lastHashedReport = hashedBytes;
+                }
+            }
+            var actual = Convert.ToHexString(sha256.GetHashAndReset());
             if (!actual.Equals(manifest.Sha256, StringComparison.OrdinalIgnoreCase))
             {
                 throw new InvalidDataException("The downloaded launcher hash does not match the signed update manifest.");
