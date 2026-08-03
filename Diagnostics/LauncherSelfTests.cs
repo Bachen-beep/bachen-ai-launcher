@@ -714,8 +714,7 @@ internal static class LauncherSelfTests
                 ArgumentList = { "/c", holdScript }
             }) ?? throw new InvalidOperationException("Unable to start process cleanup fixture."))
             {
-                await Task.Delay(500);
-                var foundPluginProcesses = PluginProcessService.FindProcessesByPluginRoots([processRoot]);
+                var foundPluginProcesses = await FindPluginProcessesWithRetryAsync(processRoot, heldProcess.Id);
                 Assert(foundPluginProcesses.Contains(heldProcess.Id), "Plugin uninstall discovers processes using the plugin directory", lines);
                 var stopResult = PluginProcessService.Stop(foundPluginProcesses);
                 Assert(stopResult.Failures.Count == 0 && heldProcess.WaitForExit(5000), "Plugin uninstall stops remaining process trees", lines);
@@ -869,6 +868,24 @@ internal static class LauncherSelfTests
             throw new InvalidOperationException($"Self-test assertion failed: {name}; expected {typeof(TException).Name}, received {ex.GetType().Name}.", ex);
         }
         throw new InvalidOperationException($"Self-test assertion failed: {name}");
+    }
+
+    private static async Task<List<int>> FindPluginProcessesWithRetryAsync(string pluginRoot, int expectedProcessId)
+    {
+        var processes = new List<int>();
+        for (var attempt = 1; attempt <= 12; attempt++)
+        {
+            processes = PluginProcessService.FindProcessesByPluginRoots([pluginRoot]);
+            if (processes.Contains(expectedProcessId))
+            {
+                return processes;
+            }
+            if (attempt < 12)
+            {
+                await Task.Delay(250);
+            }
+        }
+        return processes;
     }
 
     private static async Task WriteReportAsync(string reportPath, IEnumerable<string> lines)
