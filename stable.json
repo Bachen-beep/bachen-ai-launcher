@@ -1,13 +1,13 @@
 {
-  "Version": "0.16.23",
+  "Version": "0.16.24",
   "MinimumCompatibleVersion": "0.11.0",
-  "DownloadUrl": "https://github.com/Bachen-beep/bachen-ai-launcher/releases/download/v0.16.23/BaChen.AI.Launcher.exe",
-  "Sha256": "4750F47A2BC32D606AFC4B7B2C0DF441EC5C06343EEDE8D28604138FC841E692",
-  "ReleaseNotesUrl": "https://github.com/Bachen-beep/bachen-ai-launcher/releases/tag/v0.16.23",
-  "PublishedAt": "2026-08-03T07:36:05.6391279+00:00",
+  "DownloadUrl": "https://github.com/Bachen-beep/bachen-ai-launcher/releases/download/v0.16.24/BaChen.AI.Launcher.exe",
+  "Sha256": "793D49253B082A8D52583F41662D215007268B9125D87F5C011CE71D21871CD8",
+  "ReleaseNotesUrl": "https://github.com/Bachen-beep/bachen-ai-launcher/releases/tag/v0.16.24",
+  "PublishedAt": "2026-08-03T08:14:21.8409551+00:00",
   "Signature": {
     "KeyId": "bachen-launcher-release-2026",
     "Algorithm": "RSA-SHA256",
-    "Value": "tUPlxgWSi9v/ynqV6/o4p4tfeTH4lRckRmmTaMqNjrKU4CB2oGNxiPZC40HMIdC9QnR8/Sl6ZeEsUgo4zmNy43WFOvom0nfFh9f2/b\u002B4VysfVZG46PPGU9JoNMh8A7LTVtaYjvh6gfBBDvwK/IE5ji8EJBKrBuSRdWX7SiqTrOK9IyMgSnmqhDsaxVg0PH\u002B\u002BJDKrcJVNUCMWM52VKB7L9\u002Bm4kwYP5BJWO55DCwpd2COlwFQYQNsS9\u002BODgXCb2IB0AgiyT3cGhEIJP3l4gQlLavtgzZPLhlKEyVPSmPoBv6Np8iYTyO2krOt3jYHOzNJEhv7IDqebSJJkLYDMFgaoROzaQ\u002Byz3rXOEEYqu0EcRKt6TKxddIU\u002BTYTA9XqkBB6mPUi0Yfio9iVoyTFfyPAYPYvVTLYcsEkO983ec6elIwotkw1y/noBJq2D7\u002BTnql2svrsaYV48z1UijFjj3ZAnVi6YSefOhiTfjleT0rpAvwz2j1mhxMleHq8tqlnKCzG2"
+    "Value": "a6q0NoiTaVurkAYatnh7WhCthcpcd9kQzT1lYU8EIBAsTp9DE\u002Blm5GZ6WW/jtByARsmmLxa5sz4YHMQ9RqSc7A6X6OgcyxAQin/LIFpvELKQCcjUCmUZSk3xj2elgzpV\u002BUT6GpKRYyjvkqwJilD1k5JNY\u002BFp0tvKaFPj1dB92VYOknMJmGE5j9vlDFB1RBzu0nw8SRyrVE7PugyZGCknYsC1YhAh3f/yZe2Ona\u002By\u002BJ0FOlBZR7FOI284gwg/efNdI0\u002BpdknrqED7LEMmxZrGB75aL7ZRePWkcqdoBNBaTUgIzvxwVw3fUL6f1fVW8dL7vkFXl3Az8WTjZSu2W\u002BeHvKLzGsIKLJRwXV1oLS130sv9PavpTfzrSj3Ujn71tshDOJxLNaCETFM9Zkprq/7ih3KY29dK2QhxIi2Fb03T/54\u002BGdrjNj5o4kxoh9O3Civ1mGugnwTnRVoMlX5sSOwxjfXjJor/WAUcdTjmHhWe0sEja5jW4\u002BYvOtqL3sQofuIU"
   }
 }
