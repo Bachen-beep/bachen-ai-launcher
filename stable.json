@@ -1,13 +1,13 @@
 {
-  "Version": "0.16.27",
+  "Version": "0.16.28",
   "MinimumCompatibleVersion": "0.11.0",
-  "DownloadUrl": "https://github.com/Bachen-beep/bachen-ai-launcher/releases/download/v0.16.27/BaChen.AI.Launcher.exe",
-  "Sha256": "AA725B0B9400DC3C415185AE570A0A87C230E83997EA78D7577ABCF418FD7AFA",
-  "ReleaseNotesUrl": "https://github.com/Bachen-beep/bachen-ai-launcher/releases/tag/v0.16.27",
-  "PublishedAt": "2026-08-03T10:03:08.4294587+00:00",
+  "DownloadUrl": "https://github.com/Bachen-beep/bachen-ai-launcher/releases/download/v0.16.28/BaChen.AI.Launcher.exe",
+  "Sha256": "97575F72F79BA33AFB9BF2F32C3ED8F888E0FB426347E27D322E34A5FDFDF0DF",
+  "ReleaseNotesUrl": "https://github.com/Bachen-beep/bachen-ai-launcher/releases/tag/v0.16.28",
+  "PublishedAt": "2026-08-03T10:25:16.4223107+00:00",
   "Signature": {
     "KeyId": "bachen-launcher-release-2026",
     "Algorithm": "RSA-SHA256",
-    "Value": "2lYdAobJJAFqkTp7C0H5nf1Ud0oE6pJLLCLxfPfGIE7PRit16YlQNdnqERURelmKJW5X8hUOvLCqJLGDQzATYFU5YSesZfH3MyP563MYLrCbCmR/Pbmx7EgyfIHM\u002B2bY2UzlaqRkbGHCu0RGxjs1Ihg9qlWwdUJW0vA3q03h\u002BhtV\u002BnMi9HozzhQb\u002BGMBmxPE/18ZL/m/f3PxtOA5JAMSQBUlKv\u002BJ6x4kP8S7ft\u002BDo04sei2lZp2IbwBoK2BFqn58/d\u002B/njvrroPHSrdjvXqRg2lKLbfPiimqCQFG7J6tJx5XU2S2JYX5OBuyoxoDpQzRQXr/cHbLKS\u002BtHCWXEZkHrF1GrP9PqVsRRZfcgUsZyJuKHguDINjviOCMdh\u002B9wno1xyQKB/QnaR3tPTXE\u002BxzpD18DtpPmdUEzVB4egKdNqR8Dtv6rbwvV/9K091cEVdxM21mVOBkatToErrAkIZJkJPcr0wmQ\u002BZfOrW/hRu32VkaZb\u002BWmtdIGUTe2NNyj3ofF"
+    "Value": "t4fGwl9FeS1\u002B3qCqvSiILg\u002BUI/QyF5\u002BGVfY\u002B\u002BV/1ujBcXrImDfDazsWPe5eL/E252u2Nh4gBcpT\u002B79pNH9gi2IfSuo3sqyCFABF6aL83wc/fndxW8xwUeLdUzhci7wYNVA13hjmfyH0ZqO05UGXpIJn4NAZRP5LXK/vS9lkNt8MXT1zWVsge531t6JD5vqipWA2Rj1dXDDdoXvdOK7JQz2czezjG4jFa3MqAlR9jTEniGEx\u002B7tNj52poQwgjx4i1FdloCo/QO2jOwMwZC6EKlkn4e2/4\u002Bd/JienNTpHtUxOyfHRyReOaf7v1NvzWRO0sevdaoe9ZOyQoTlZ\u002B/w4Nx8eVHUKzyhlkr384X4jFHH8B1lbEV9GfNFDguqqVqqAQiuLr4t54QArMzK7Bz9NlIINAoAli7JGAu0xpU72GQ9Gwk0aHTYzCsmnTtdVj26zzgi82HxtCLSFjT/Fzm1z2tfVaqnYV6cDh62NeTwwyGa7ckbgoO/IEv5u\u002BG88FiOjH"
   }
 }
