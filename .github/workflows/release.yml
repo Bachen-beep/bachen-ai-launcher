@@ -282,9 +282,21 @@ jobs:
           gh api --method PUT "repos/$repo/contents/stable.json" --input $requestPath
           if ($LASTEXITCODE -ne 0) { throw "Unable to publish stable.json." }
 
+          # The GitHub Contents API reads from the committed branch immediately. Verify
+          # this authoritative source before treating a Raw CDN cache delay as a release failure.
           $expected = (Get-FileHash -LiteralPath $feedPath -Algorithm SHA256).Hash
-          $verified = $false
-          foreach ($attempt in 1..12) {
+          $publishedJson = gh api "repos/$repo/contents/stable.json?ref=$branch"
+          if ($LASTEXITCODE -ne 0) { throw "Unable to read back stable.json from the $branch branch." }
+          $publishedContent = ($publishedJson | ConvertFrom-Json).content -replace '\s', ''
+          $publishedBytes = [Convert]::FromBase64String($publishedContent)
+          $publishedPath = Join-Path $env:RUNNER_TEMP "stable-feed-api-verify.json"
+          [IO.File]::WriteAllBytes($publishedPath, $publishedBytes)
+          $publishedHash = (Get-FileHash -LiteralPath $publishedPath -Algorithm SHA256).Hash
+          if ($publishedHash -ne $expected) { throw "Published stable.json does not match the verified release manifest." }
+          Write-Host "Stable update feed verified through the GitHub Contents API."
+
+          $rawVerified = $false
+          foreach ($attempt in 1..24) {
             try {
               $downloadPath = Join-Path $env:RUNNER_TEMP "stable-feed-verify.json"
               Invoke-WebRequest `
@@ -292,11 +304,13 @@ jobs:
                 -Uri "https://raw.githubusercontent.com/$repo/$branch/stable.json?verify=$([Guid]::NewGuid().ToString('N'))" `
                 -OutFile $downloadPath
               if ((Get-FileHash -LiteralPath $downloadPath -Algorithm SHA256).Hash -eq $expected) {
-                $verified = $true
+                $rawVerified = $true
                 break
               }
             }
             catch { }
-            Start-Sleep -Seconds 5
+            if ($attempt -lt 24) { Start-Sleep -Seconds 5 }
           }
-          if (-not $verified) { throw "The stable update feed did not become visible with the verified release manifest." }
+          if (-not $rawVerified) {
+            Write-Warning "stable.json is committed and verified, but GitHub Raw CDN propagation exceeded two minutes. Clients may observe the update shortly."
+          }
