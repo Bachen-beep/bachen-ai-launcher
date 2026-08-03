@@ -18,6 +18,17 @@ internal sealed record SourceUpdateCheck(
     bool UpdateAvailable,
     bool HasLocalBaseline);
 
+internal enum SourceUpdateProgressStage
+{
+    Downloading,
+    Installing
+}
+
+internal sealed record SourceUpdateProgress(
+    SourceUpdateProgressStage Stage,
+    long Completed,
+    long? Total);
+
 internal sealed record UpdateBackupEntry(GitHubUpdateSource Source, string Path, DateTime LastWriteTime);
 
 internal sealed record UpdateBackupMetadata(

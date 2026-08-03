@@ -810,13 +810,18 @@ internal sealed class LauncherForm : Form
     private readonly RichTextBox _log = new();
     private readonly List<LauncherLogEntry> _logEntries = [];
     private readonly Dictionary<string, ServiceRuntimeState> _runtimeStates = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<string, SourceUpdateCheck> _availableSourceUpdates = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, PluginListItem> _pluginItems = new(StringComparer.OrdinalIgnoreCase);
     private readonly System.Windows.Forms.Timer _gpuRefreshTimer = new() { Interval = 5000 };
     private readonly System.Windows.Forms.Timer _logAnimationTimer = new() { Interval = 15 };
     private readonly ToolTip _toolTip = new();
     private RoundedButton _openButton = new();
     private RoundedButton? _detailPrimaryButton;
+    private RoundedButton? _detailUpdateButton;
+    private RoundedButton? _detailStopButton;
     private RoundedButton? _detailUninstallButton;
+    private ProgressBar? _detailUpdateProgress;
+    private ParagraphLabel? _detailActionHint;
     private RoundedButton? _logToggleButton;
     private SafeTextLabel? _gpuSummaryLabel;
     private SafeTextLabel? _gpuNameLabel;
@@ -1368,6 +1373,13 @@ internal sealed class LauncherForm : Form
                 checks.Add(await FetchUpdateCheckAsync(source));
             }
 
+            _availableSourceUpdates.Clear();
+            foreach (var check in checks.Where(check => check.UpdateAvailable))
+            {
+                _availableSourceUpdates[Path.GetFullPath(check.Source.DeploymentRoot)] = check;
+            }
+            UpdatePluginUi();
+
             var lines = checks.Select(check =>
             {
                 var shortSha = check.LatestSha[..Math.Min(8, check.LatestSha.Length)];
@@ -1382,6 +1394,10 @@ internal sealed class LauncherForm : Form
                     : L($"{check.Source.DisplayName}：已是记录中的最新版本", $"{check.Source.DisplayName}: up to date");
             });
             var summary = string.Join(Environment.NewLine, lines);
+            if (checks.Any(check => check.UpdateAvailable))
+            {
+                summary += Environment.NewLine + Environment.NewLine + L("请选择有更新的插件，然后点击“启动插件”旁的“更新插件”。", "Select a plugin with an available update, then click Update plugin next to Launch plugin.");
+            }
             AppendLog(summary.Replace(Environment.NewLine, " | "));
             SetRuntimePhase("更新检查完成", "Update check complete");
             MessageBox.Show(summary, L("GitHub 更新检查", "GitHub update check"), MessageBoxButtons.OK, MessageBoxIcon.Information);
@@ -1636,6 +1652,11 @@ internal sealed class LauncherForm : Form
             {
                 checks.Add(await FetchUpdateCheckAsync(source));
             }
+            _availableSourceUpdates.Clear();
+            foreach (var check in checks.Where(check => check.UpdateAvailable))
+            {
+                _availableSourceUpdates[Path.GetFullPath(check.Source.DeploymentRoot)] = check;
+            }
             var count = checks.Count(check => check.UpdateAvailable || !check.HasLocalBaseline);
             _backgroundUpdateStatusChinese = count == 0 ? "源码已是最新记录" : $"{count} 个源码可检查更新";
             _backgroundUpdateStatusEnglish = count == 0 ? "Sources match tracked versions" : $"{count} source update(s) available";
@@ -1783,13 +1804,101 @@ internal sealed class LauncherForm : Form
         }
     }
 
+    private async Task UpdateSelectedPluginAsync()
+    {
+        if (_updateBusy)
+        {
+            return;
+        }
+
+        var selected = _pluginEntries.FirstOrDefault(entry => entry.Id.Equals(_selectedPluginId, StringComparison.OrdinalIgnoreCase));
+        if (selected is null || !_availableSourceUpdates.TryGetValue(Path.GetFullPath(selected.Profile.WorkingDirectory), out var check))
+        {
+            return;
+        }
+
+        var runningPids = GetKnownServicePids();
+        if (runningPids.Count > 0 && MessageBox.Show(
+                L("检测到 AI 服务正在运行。更新插件前需要停止已识别的服务，是否继续？", "AI services are running. Stop recognized services before updating this plugin?"),
+                L("需要停止服务", "Services must stop"),
+                MessageBoxButtons.YesNo,
+                MessageBoxIcon.Warning) != DialogResult.Yes)
+        {
+            return;
+        }
+
+        _updateBusy = true;
+        try
+        {
+            if (runningPids.Count > 0)
+            {
+                StopProcesses(runningPids);
+                await Task.Delay(700);
+            }
+            SetServiceRuntimeState(selected.Profile, ServiceRuntimeState.Updating);
+            if (_detailUpdateProgress is not null)
+            {
+                _detailUpdateProgress.Value = 0;
+                _detailUpdateProgress.Style = ProgressBarStyle.Marquee;
+                _detailUpdateProgress.Visible = true;
+            }
+            SetRuntimePhase($"正在更新 {check.Source.DisplayName}", $"Updating {check.Source.DisplayName}");
+            var progress = new Progress<SourceUpdateProgress>(UpdateSelectedPluginProgress);
+            var backupPath = await ApplySourceUpdateAsync(check, progress);
+            _availableSourceUpdates.Remove(Path.GetFullPath(check.Source.DeploymentRoot));
+            SetServiceRuntimeState(selected.Profile, ServiceRuntimeState.Ready);
+            var result = L($"{check.Source.DisplayName} 已更新。备份：{backupPath}", $"{check.Source.DisplayName} updated. Backup: {backupPath}");
+            AppendLog(result);
+            MessageBox.Show(result + Environment.NewLine + Environment.NewLine + L("模型权重和本地运行环境已保留。若依赖文件有变化，请运行环境自检。", "Model weights and local runtime environments were preserved. Run environment check if dependencies changed."), L("插件更新完成", "Plugin update complete"), MessageBoxButtons.OK, MessageBoxIcon.Information);
+        }
+        catch (Exception ex)
+        {
+            SetServiceRuntimeState(selected.Profile, ServiceRuntimeState.Error);
+            AppendLog(L($"{check.Source.DisplayName} 更新失败：{ex.Message}", $"{check.Source.DisplayName} update failed: {ex.Message}"), selected.Profile, true);
+            MessageBox.Show(ex.Message, L("插件更新失败", "Plugin update failed"), MessageBoxButtons.OK, MessageBoxIcon.Error);
+        }
+        finally
+        {
+            _updateBusy = false;
+            SetRuntimePhase("插件更新流程完成", "Plugin update workflow complete");
+            RefreshStatus();
+        }
+    }
+
+    private void UpdateSelectedPluginProgress(SourceUpdateProgress progress)
+    {
+        if (_detailUpdateProgress is null)
+        {
+            return;
+        }
+        var total = progress.Total.GetValueOrDefault();
+        if (total <= 0)
+        {
+            _detailUpdateProgress.Style = ProgressBarStyle.Marquee;
+            return;
+        }
+        var percent = (int)Math.Round(Math.Clamp(progress.Completed, 0, total) * 100D / total, MidpointRounding.AwayFromZero);
+        var value = progress.Stage == SourceUpdateProgressStage.Downloading
+            ? (int)Math.Round(percent * 0.65D, MidpointRounding.AwayFromZero)
+            : 65 + (int)Math.Round(percent * 0.35D, MidpointRounding.AwayFromZero);
+        _detailUpdateProgress.Style = ProgressBarStyle.Continuous;
+        _detailUpdateProgress.Value = Math.Clamp(value, 0, 100);
+        var selected = _pluginEntries.FirstOrDefault(entry => entry.Id.Equals(_selectedPluginId, StringComparison.OrdinalIgnoreCase));
+        if (_detailStatusLabel is not null && selected is not null)
+        {
+            _detailStatusLabel.Text = progress.Stage == SourceUpdateProgressStage.Downloading
+                ? L($"正在下载更新 {percent}%", $"Downloading update {percent}%")
+                : L($"正在替换源码 {percent}%", $"Replacing source {percent}%");
+        }
+    }
+
     private static string UpdateStatePath(GitHubUpdateSource source) => GitHubUpdateService.UpdateStatePath(source);
     private SourceUpdateState? LoadUpdateState(GitHubUpdateSource source) => _sourceUpdateService.LoadState(source);
     private void SaveUpdateState(GitHubUpdateSource source, string commitSha) => _sourceUpdateService.SaveState(source, commitSha);
     private Task<SourceUpdateCheck> FetchUpdateCheckAsync(GitHubUpdateSource source) => _sourceUpdateService.FetchCheckAsync(source);
     private Task<string[]> GetChangedDependencyFilesAsync(GitHubUpdateSource source) => _sourceUpdateService.GetChangedDependencyFilesAsync(source);
 
-    private async Task<string> ApplySourceUpdateAsync(SourceUpdateCheck check)
+    private async Task<string> ApplySourceUpdateAsync(SourceUpdateCheck check, IProgress<SourceUpdateProgress>? progress = null)
     {
         var source = check.Source;
         var tempRoot = Path.Combine(Path.GetTempPath(), "bachen-ai-update-" + Guid.NewGuid().ToString("N"));
@@ -1804,18 +1913,37 @@ internal sealed class LauncherForm : Form
                 response.EnsureSuccessStatusCode();
                 await using var input = await response.Content.ReadAsStreamAsync();
                 await using var output = new FileStream(archivePath, FileMode.Create, FileAccess.Write, FileShare.None);
-                await input.CopyToAsync(output);
+                var totalBytes = response.Content.Headers.ContentLength;
+                progress?.Report(new SourceUpdateProgress(SourceUpdateProgressStage.Downloading, 0, totalBytes));
+                var buffer = new byte[128 * 1024];
+                long downloadedBytes = 0;
+                while (true)
+                {
+                    var read = await input.ReadAsync(buffer);
+                    if (read == 0)
+                    {
+                        break;
+                    }
+                    await output.WriteAsync(buffer.AsMemory(0, read));
+                    downloadedBytes += read;
+                    progress?.Report(new SourceUpdateProgress(SourceUpdateProgressStage.Downloading, downloadedBytes, totalBytes));
+                }
             }
 
             ZipFile.ExtractToDirectory(archivePath, extractPath);
             var extractedRoot = Directory.GetDirectories(extractPath).SingleOrDefault()
                 ?? throw new InvalidDataException("The GitHub archive did not contain a source directory.");
             Directory.CreateDirectory(backupStaging);
-            foreach (var sourceFile in Directory.EnumerateFiles(extractedRoot, "*", SearchOption.AllDirectories))
+            var sourceFiles = Directory.EnumerateFiles(extractedRoot, "*", SearchOption.AllDirectories).ToArray();
+            progress?.Report(new SourceUpdateProgress(SourceUpdateProgressStage.Installing, 0, sourceFiles.Length));
+            var installedFiles = 0;
+            foreach (var sourceFile in sourceFiles)
             {
                 var relative = Path.GetRelativePath(extractedRoot, sourceFile).Replace('\\', '/');
                 if (ShouldPreserveUpdatePath(source, relative))
                 {
+                    installedFiles++;
+                    progress?.Report(new SourceUpdateProgress(SourceUpdateProgressStage.Installing, installedFiles, sourceFiles.Length));
                     continue;
                 }
 
@@ -1828,6 +1956,8 @@ internal sealed class LauncherForm : Form
                 }
                 Directory.CreateDirectory(Path.GetDirectoryName(destination)!);
                 File.Copy(sourceFile, destination, true);
+                installedFiles++;
+                progress?.Report(new SourceUpdateProgress(SourceUpdateProgressStage.Installing, installedFiles, sourceFiles.Length));
             }
 
             var backupsRoot = Path.Combine(source.DeploymentRoot, "launcher-update-backups");
@@ -3741,18 +3871,28 @@ internal sealed class LauncherForm : Form
         _detailPrimaryButton.Height = 42;
         _detailPrimaryButton.Click += (_, _) => HandlePrimaryPluginAction();
         _openButton = _detailPrimaryButton;
+        _detailUpdateButton = CreateActionButton(L("更新插件", "Update plugin"), Color.FromArgb(170, 102, 49), 150);
+        _detailUpdateButton.Location = new Point(210, 466);
+        _detailUpdateButton.Height = 42;
+        _detailUpdateButton.Visible = false;
+        _detailUpdateButton.Click += async (_, _) => await UpdateSelectedPluginAsync();
         var stopButton = CreateActionButton(L("停止当前 AI", "Stop active AI"), Theme.Coral, 130);
         stopButton.Location = new Point(210, 466);
         stopButton.Height = 42;
         stopButton.Click += (_, _) => StopKnownServices();
+        _detailStopButton = stopButton;
         _detailUninstallButton = CreateActionButton(L("卸载插件", "Uninstall"), Color.FromArgb(96, 99, 108), 140);
         _detailUninstallButton.Location = new Point(350, 466);
         _detailUninstallButton.Height = 42;
         _detailUninstallButton.Click += async (_, _) => await UninstallSelectedPluginAsync();
         detailPanel.Controls.Add(_detailPrimaryButton);
+        detailPanel.Controls.Add(_detailUpdateButton);
         detailPanel.Controls.Add(stopButton);
         detailPanel.Controls.Add(_detailUninstallButton);
-        detailPanel.Controls.Add(CreateParagraph(L("模型启动后，主按钮会自动切换为打开 WebUI。", "The primary action changes to Open WebUI when the service is ready."), new Rectangle(30, 520, 500, 45), 8.5F, Theme.Muted, FontStyle.Regular));
+        _detailUpdateProgress = new ProgressBar { Location = new Point(180, 534), Size = new Size(310, 8), Minimum = 0, Maximum = 100, Visible = false };
+        detailPanel.Controls.Add(_detailUpdateProgress);
+        _detailActionHint = CreateParagraph(L("模型启动后，主按钮会自动切换为打开 WebUI。", "The primary action changes to Open WebUI when the service is ready."), new Rectangle(30, 520, 500, 45), 8.5F, Theme.Muted, FontStyle.Regular);
+        detailPanel.Controls.Add(_detailActionHint);
         detailPanel.SizeChanged += (_, _) =>
         {
             var width = Math.Max(280, detailPanel.ClientSize.Width - 60);
@@ -3998,6 +4138,7 @@ internal sealed class LauncherForm : Form
 
         var selected = _pluginEntries.FirstOrDefault(entry => entry.Id.Equals(_selectedPluginId, StringComparison.OrdinalIgnoreCase)) ?? _pluginEntries[0];
         var selectedState = GetRuntimeState(selected.Profile);
+        var sourceUpdateAvailable = _availableSourceUpdates.ContainsKey(Path.GetFullPath(selected.Profile.WorkingDirectory));
         if (_detailTitleLabel is not null) _detailTitleLabel.Text = selected.Title;
         if (_detailDescriptionLabel is not null) _detailDescriptionLabel.Text = selected.Description;
         if (_detailStatusLabel is not null)
@@ -4046,10 +4187,29 @@ internal sealed class LauncherForm : Form
             _detailPrimaryButton.Enabled = selectedState is not (ServiceRuntimeState.Checking or ServiceRuntimeState.Starting or ServiceRuntimeState.Stopping or ServiceRuntimeState.Updating);
             _detailPrimaryButton.Invalidate();
         }
+        if (_detailUpdateButton is not null)
+        {
+            _detailUpdateButton.Visible = sourceUpdateAvailable;
+            _detailUpdateButton.Enabled = sourceUpdateAvailable && selectedState is not (ServiceRuntimeState.Checking or ServiceRuntimeState.Starting or ServiceRuntimeState.Stopping or ServiceRuntimeState.Updating);
+            _detailUpdateButton.Invalidate();
+        }
+        if (_detailStopButton is not null)
+        {
+            _detailStopButton.Location = sourceUpdateAvailable ? new Point(370, 466) : new Point(210, 466);
+        }
         if (_detailUninstallButton is not null)
         {
+            _detailUninstallButton.Location = sourceUpdateAvailable ? new Point(30, 516) : new Point(350, 466);
             _detailUninstallButton.Enabled = selectedState is not (ServiceRuntimeState.Checking or ServiceRuntimeState.Starting or ServiceRuntimeState.Stopping or ServiceRuntimeState.Updating);
             _detailUninstallButton.Invalidate();
+        }
+        if (_detailActionHint is not null)
+        {
+            _detailActionHint.Bounds = sourceUpdateAvailable ? new Rectangle(30, 550, 500, 45) : new Rectangle(30, 520, 500, 45);
+        }
+        if (_detailUpdateProgress is not null)
+        {
+            _detailUpdateProgress.Visible = selectedState == ServiceRuntimeState.Updating;
         }
     }
 
