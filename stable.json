@@ -1,13 +1,13 @@
 {
-  "Version": "0.16.32",
+  "Version": "0.16.33",
   "MinimumCompatibleVersion": "0.11.0",
-  "DownloadUrl": "https://github.com/Bachen-beep/bachen-ai-launcher/releases/download/v0.16.32/BaChen.AI.Launcher.exe",
-  "Sha256": "78F117E7841D53D97E6920326B312862489272DE74DD31ECDB024CF66BB81128",
-  "ReleaseNotesUrl": "https://github.com/Bachen-beep/bachen-ai-launcher/releases/tag/v0.16.32",
-  "PublishedAt": "2026-08-04T05:03:56.8960358+00:00",
+  "DownloadUrl": "https://github.com/Bachen-beep/bachen-ai-launcher/releases/download/v0.16.33/BaChen.AI.Launcher.exe",
+  "Sha256": "6B6BE76B5A65D5CBB42A5383C4977F441F05788C89BEEB21F30DCB97CA61FE07",
+  "ReleaseNotesUrl": "https://github.com/Bachen-beep/bachen-ai-launcher/releases/tag/v0.16.33",
+  "PublishedAt": "2026-08-04T05:41:47.7941619+00:00",
   "Signature": {
     "KeyId": "bachen-launcher-release-2026",
     "Algorithm": "RSA-SHA256",
-    "Value": "sG/mJ0ttzSeyXJjWxTi5KFcc5kBr5AqRB2sAT5SEYvSFtDAwnsS\u002BRnIJ/gzgZwNatPkNf3md3alYzTpVr\u002BvD2\u002BN4VVp26XeLaMQfAVe1InMrH5uZV8imFysUu8lot/gm89871dH\u002BwnEbDuxaN0Y0LhDbYVYJTLjEFnsMrVOg1hJnmRazJ8jphoOjqsaRcfFzFhKkkGUNr2PXXyYwCGN4dDgvEYqEvItb6VOUfW5jmW/11ruA/Tw\u002BuHa9yFA9DDpngXEf0Q7xVZi6Qu7SyT4up7vGy\u002Bt3k5FcifmO/NwR1NQ9Phgk86WpE2NoLT0hXclGuOC4q5fL2S5TubJPLc43OQtrXUxu4tyn70A916\u002BjZPZOczDFUKq1tAPKoWHTJhXTkQ5bOYfFIoz0eI9ns7xQlfL0NgfqSS6k8zXViqlfMHF4m7Leqay1bHjDWo0aUhDsUrJlwnRKGCqWRFcArrK5tdoX7E5mbP/LD3aYnCTkxjaez8f3e07M4RITfZcD9SeX"
+    "Value": "ZOEVg9g8fYMR4yQdw7NeZwDeLBPWiRQ1StT8InZGyht9rN39fpcNYx9yBWvGcgIExd6XTjr3ypG509vU16NlSMyOEqVNn17D1z/U8ySKjRlHtkPVJqWUOKi6iNJktFJMhIWhsX\u002BG1kvU5sb1Rh5yjWcZr0twYYhq471iYZEGWOijc4cfVAMZ4ZhbtN0ArDEtmb0vcr1XbdJIs\u002Bd2RLXFd/fz9Qktp43957/YbkDHE8lKDT6xKbHALdeTOPSElsT\u002B7/r\u002BxM8mkILUDONUzHfOtcQTNf4aChM6sXNZpzG4BFx7ItTgtMmoRDQa6z5HZm4u0906uzlQp7KO/6z\u002B0ZKIKIBvhVL\u002BFyNXxR8DbBW2dzQJUnqgZ6vmRDkvyv\u002B5uo\u002B4MaFcLuLKWD9orAKTPnHclGZcTG2F0zUUuOK7VcZCxAGogsaUKVpcGgCj3AEm5S4Hkwim5HAiozO0Gtx4rBOzP/4\u002BLgQWO2EsJL2AdQ0HHifH/Twd/RAAgm5S/WC1X61N"
   }
 }
