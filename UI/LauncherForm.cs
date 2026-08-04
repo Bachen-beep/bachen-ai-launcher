@@ -1203,6 +1203,7 @@ internal sealed class LauncherForm : Form
     private RoundedButton? _detailUpdateButton;
     private RoundedButton? _detailStopButton;
     private RoundedButton? _detailUninstallButton;
+    private RoundedPanel? _detailPanel;
     private Panel? _detailActionsPanel;
     private GlassProgressBar? _detailUpdateProgress;
     private bool _pluginUpdateInProgress;
@@ -4146,8 +4147,8 @@ internal sealed class LauncherForm : Form
     {
         Text = "BaChen AI Launcher";
         StartPosition = FormStartPosition.CenterScreen;
-        MinimumSize = new Size(1180, 800);
-        Size = new Size(1440, 900);
+        MinimumSize = new Size(1280, 900);
+        Size = new Size(1440, 960);
         Font = new Font("Microsoft YaHei UI", 10F);
         BackColor = Color.FromArgb(229, 237, 234);
         _pluginItems.Clear();
@@ -4202,7 +4203,7 @@ internal sealed class LauncherForm : Form
         _logHost = new Panel
         {
             Dock = DockStyle.Bottom,
-            Height = 210,
+            Height = 170,
             BackColor = BackColor,
             Padding = new Padding(12, 4, 12, 8)
         };
@@ -4297,7 +4298,7 @@ internal sealed class LauncherForm : Form
         var statusStrip = new Panel
         {
             Dock = DockStyle.Bottom,
-            Height = 56,
+            Height = 44,
             BackColor = Color.FromArgb(214, 226, 222),
             Padding = new Padding(22, 8, 22, 8)
         };
@@ -4469,6 +4470,7 @@ internal sealed class LauncherForm : Form
             BorderColor = Color.FromArgb(202, 218, 213),
             BorderWidth = 1
         };
+        _detailPanel = detailPanel;
         _detailTitleLabel = CreateText(string.Empty, new Rectangle(30, 22, 500, 39), 17F, Theme.Ink, FontStyle.Bold);
         _detailDescriptionLabel = CreateParagraph(string.Empty, new Rectangle(30, 66, 500, 54), 9F, Theme.Muted, FontStyle.Regular);
         _detailStatusLabel = CreateText(string.Empty, new Rectangle(30, 126, 500, 32), 10F, Theme.DeepTeal, FontStyle.Bold);
@@ -4561,6 +4563,7 @@ internal sealed class LauncherForm : Form
             _detailUpdateProgress.Width = width;
             _detailActionHint.Width = width;
             LayoutPluginActionButtons();
+            LayoutDetailActionArea(_detailUpdateButton?.Visible == true);
         };
         mainShell.Controls.Add(detailPanel, 2, 0);
 
@@ -4799,6 +4802,47 @@ internal sealed class LauncherForm : Form
         }
     }
 
+    private void LayoutDetailActionArea(bool sourceUpdateAvailable)
+    {
+        if (_detailPanel is null || _detailActionsPanel is null || _detailUpdateProgress is null || _detailActionHint is null)
+        {
+            return;
+        }
+
+        const int left = 30;
+        const int preferredActionTop = 438;
+        const int actionGap = 12;
+        const int progressGap = 8;
+        const int bottomPadding = 10;
+        var showProgress = _detailUpdateProgress.Visible;
+        var hintHeight = sourceUpdateAvailable ? 34 : 38;
+        var requiredHeight = _detailActionsPanel.Height + actionGap + hintHeight + bottomPadding;
+        if (showProgress)
+        {
+            requiredHeight += _detailUpdateProgress.Height + progressGap;
+        }
+
+        var topAfterLaunchProfile = _stableModePanel?.Visible == true
+            ? _stableModePanel.Bottom + 6
+            : preferredActionTop;
+        var actionTop = Math.Min(preferredActionTop, _detailPanel.ClientSize.Height - requiredHeight);
+        actionTop = Math.Max(topAfterLaunchProfile, actionTop);
+
+        _detailActionsPanel.Location = new Point(left, actionTop);
+        if (showProgress)
+        {
+            _detailUpdateProgress.Location = new Point(left, _detailActionsPanel.Bottom + actionGap);
+            _detailActionHint.Location = new Point(left, _detailUpdateProgress.Bottom + progressGap);
+        }
+        else
+        {
+            _detailUpdateProgress.Location = new Point(left, _detailActionsPanel.Bottom + actionGap);
+            _detailActionHint.Location = new Point(left, _detailActionsPanel.Bottom + actionGap);
+        }
+
+        _detailActionHint.Height = hintHeight;
+    }
+
     private void UpdatePluginUi()
     {
         if (_pluginEntries.Count == 0)
@@ -4891,12 +4935,6 @@ internal sealed class LauncherForm : Form
             _detailUninstallButton.Enabled = selectedState is not (ServiceRuntimeState.Checking or ServiceRuntimeState.Starting or ServiceRuntimeState.Stopping or ServiceRuntimeState.Updating);
             _detailUninstallButton.Invalidate();
         }
-        LayoutPluginActionButtons();
-        if (_detailActionHint is not null)
-        {
-            _detailActionHint.Top = sourceUpdateAvailable ? 510 : 492;
-            _detailActionHint.Height = sourceUpdateAvailable ? 38 : 42;
-        }
         if (_detailUpdateProgress is not null)
         {
             _detailUpdateProgress.Visible = selectedState == ServiceRuntimeState.Updating &&
@@ -4906,6 +4944,8 @@ internal sealed class LauncherForm : Form
                 UpdateSelectedPluginProgress(_latestPluginUpdateProgress);
             }
         }
+        LayoutPluginActionButtons();
+        LayoutDetailActionArea(sourceUpdateAvailable);
     }
 
     private string RuntimeStateText(ServiceRuntimeState state) => state switch
