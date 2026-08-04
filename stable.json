@@ -1,13 +1,13 @@
 {
-  "Version": "0.16.34",
+  "Version": "0.16.35",
   "MinimumCompatibleVersion": "0.11.0",
-  "DownloadUrl": "https://github.com/Bachen-beep/bachen-ai-launcher/releases/download/v0.16.34/BaChen.AI.Launcher.exe",
-  "Sha256": "9CF19A6C3BD49792C06B3F5DDEB2713D1CBF3EFF94B82EF6379B55B50CB83375",
-  "ReleaseNotesUrl": "https://github.com/Bachen-beep/bachen-ai-launcher/releases/tag/v0.16.34",
-  "PublishedAt": "2026-08-04T08:11:23.5503126+00:00",
+  "DownloadUrl": "https://github.com/Bachen-beep/bachen-ai-launcher/releases/download/v0.16.35/BaChen.AI.Launcher.exe",
+  "Sha256": "31161AB21357C3371683461D5EF8B7E3F47F49FED20E4EC3123B6EDA66B016E5",
+  "ReleaseNotesUrl": "https://github.com/Bachen-beep/bachen-ai-launcher/releases/tag/v0.16.35",
+  "PublishedAt": "2026-08-04T08:46:36.4743918+00:00",
   "Signature": {
     "KeyId": "bachen-launcher-release-2026",
     "Algorithm": "RSA-SHA256",
-    "Value": "0zWrmdIvBLSk3tzEKvbWKp0QjdJ83fCftSraXTRa37ciUJ1Ao8Um7Q8Av31E8NwGCKeyPCtYUg6YVwqYltcZvMX1G6O9HInrqK3/mrdHfPisNcbayazANVcwlWrFTdKvcVmomQM79UPm7iEvyw0WzkFxllAUFxD8Sn0L6708SNU3swl15Wo7IJIarZfP/X1YVsQwuxjg4xmJHcHzVs5hs2KD6gJKpSTQqDfwuu2A9eIXr3LWk\u002BKrjm\u002BWV4YVgaLLP7M5G5vJcCYugG/l/4UlnmBZsLH8wiV7kOXTAA3oHpNBBVru0s/bfvmzzv/p2AsNWfsNoIxbYkWQZODG9\u002BOnCALQA/Z2/l8\u002BlVcQMnfQWsY\u002B1h2f70BntAr/tNzAqcjV/BCC1e8aF617RnZGI1wybRpGJBJ777a00/ouVUtL6srR4h5DKGPs/z/P3lWb\u002Bz2LUSg7Q/TnyJ03wHheZqKn3IPf5W1T5aidX6Te8d5nvqF6R/aKBpcMXCQlU8SL8EdB"
+    "Value": "hWLgSx7DBLgXTbsVN5jsJf9CLsIAc\u002BVMkNjF0sNdIi1rbFVEX4KLSmx2Joqzura\u002BTKjwk\u002BPCqB0uoM7\u002BIle1uawGcF8vUsy9LSwo0JrAj/\u002BtYoiJfInvcMu8C1REHKKMedOkA2QayUBcbtb5vZBGbhuFJ/Id4kf/Ev/4kCzl8bNxM5UMFu87WBLJaWiSTCLOOSPS3LfWaRomjK5wxyxZKodjWFDtGsIzpjdkasb9lq1DZ4DUv94jkb\u002Brzfr8K/oRe48B3qsg4fAf9Q1FyS31g/IQ20sVGlIdYBrT3WjFokeoid59pGjATQR\u002Bh66oNiCEjm4YdtpZyc1a4mSK\u002BbcnBx852Y\u002B7vcI/2LUitjZ\u002Bp8NvA3q2dF66R5fQAwSd5/o9JtSmsDkSF42Es7MV6U23d1n\u002BPH4x7YO6Zs48ymVUfIxtq25oX8ntGqTfpVjtJ4c2ZpdlaLjqh9ixJZrUot5UHBL5nXMyYmb4OGgDVfi1TXI5hykJXy8EArR9s7hmthVb"
   }
 }
