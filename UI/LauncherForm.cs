@@ -284,7 +284,8 @@ internal sealed class RoundedButton : Control
 
     protected override void OnPaint(PaintEventArgs e)
     {
-        e.Graphics.Clear(PaintSurface.ResolveParentColor(this));
+        var background = BackColor.A > 0 ? BackColor : PaintSurface.ResolveParentColor(this);
+        e.Graphics.Clear(background);
         e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
         var pressOffset = _pressed ? 1 : 0;
         var color = !Enabled
@@ -299,15 +300,15 @@ internal sealed class RoundedButton : Control
             e.Graphics,
             path,
             bodyBounds,
-            Enabled ? 12 + (int)Math.Round(_hoverProgress * 22) : 7,
-            _hoverProgress,
-            Enabled ? (int)Math.Round(_hoverProgress * 54) : 0);
-        using var innerBorder = new Pen(Color.FromArgb(Enabled ? 48 : 20, Color.White), 1F);
+            Enabled ? 8 + (int)Math.Round(_hoverProgress * 8) : 6,
+            _hoverProgress * 0.35F,
+            Enabled ? (int)Math.Round(_hoverProgress * 14) : 0);
+        using var innerBorder = new Pen(Color.FromArgb(Enabled ? 20 : 12, Color.White), 1F);
         e.Graphics.DrawPath(innerBorder, path);
         if (Focused && Enabled)
         {
             using var focusPath = CreatePillPath(Rectangle.Inflate(bodyBounds, -3, -3));
-            using var focusPen = new Pen(Color.FromArgb(150, Color.White), 1.2F);
+            using var focusPen = new Pen(Color.FromArgb(170, Theme.MidTeal), 1.2F);
             e.Graphics.DrawPath(focusPen, focusPath);
         }
         PaintSurface.DrawText(
@@ -433,7 +434,8 @@ internal sealed class SafeTextLabel : Control
 
     protected override void OnPaint(PaintEventArgs e)
     {
-        e.Graphics.Clear(PaintSurface.ResolveParentColor(this));
+        var background = BackColor.A > 0 ? BackColor : PaintSurface.ResolveParentColor(this);
+        e.Graphics.Clear(background);
         var horizontal = TextAlign switch
         {
             ContentAlignment.BottomCenter or ContentAlignment.MiddleCenter or ContentAlignment.TopCenter => StringAlignment.Center,
@@ -1252,7 +1254,12 @@ internal sealed class LauncherForm : Form
     private ServiceProfile? _selectedStableProfile;
     private string _backgroundUpdateStatusChinese = string.Empty;
     private string _backgroundUpdateStatusEnglish = string.Empty;
-    private MaintenanceCenterForm? _maintenanceCenter;
+    private SettingsWorkspace? _settingsWorkspace;
+    private Panel? _logResizeGrip;
+    private bool _resizingLogWindow;
+    private int _logResizeStartScreenY;
+    private int _logResizeStartHeight;
+    private int _logResizeStartLogHeight;
 
     public LauncherForm()
     {
@@ -1527,7 +1534,6 @@ internal sealed class LauncherForm : Form
 
     private void ToggleLanguage()
     {
-        _maintenanceCenter?.Close();
         _useEnglish = !_useEnglish;
         _pluginCategory = "*";
         Controls.Clear();
@@ -1579,7 +1585,7 @@ internal sealed class LauncherForm : Form
         var plugins = Path.Combine(normalizedRoot, "plugins");
         return new LauncherSettings
         {
-            SchemaVersion = 4,
+            SchemaVersion = 5,
             DataRoot = normalizedRoot,
             WooshRoot = Path.Combine(plugins, "Woosh"),
             StableRoot = Path.Combine(plugins, "Stable Audio 3"),
@@ -1592,9 +1598,10 @@ internal sealed class LauncherForm : Form
 
     private static void NormalizeSettings(LauncherSettings settings)
     {
-        settings.SchemaVersion = 4;
+        settings.SchemaVersion = 5;
         settings.GitHubProxyUrl = TryValidateProxyUrl(settings.GitHubProxyUrl, out _) ? settings.GitHubProxyUrl.Trim() : string.Empty;
         settings.DataRoot = MigrateRenamedPath(settings.DataRoot);
+        settings.RuntimeLogHeight = Math.Clamp(settings.RuntimeLogHeight, 180, 480);
         settings.WooshRoot = MigrateRenamedPath(settings.WooshRoot);
         settings.StableRoot = MigrateRenamedPath(settings.StableRoot);
         settings.IndexTtsRoot = MigrateRenamedPath(settings.IndexTtsRoot);
@@ -1977,7 +1984,7 @@ internal sealed class LauncherForm : Form
 
     private void ShowLauncherUpdateProgress()
     {
-        _maintenanceCenter?.ReportProgress(null, L("正在准备启动器更新", "Preparing launcher update"));
+        _settingsWorkspace?.ReportProgress(null, L("正在准备启动器更新", "Preparing launcher update"));
     }
 
     private void UpdateLauncherUpdateProgress(LauncherUpdateProgress progress)
@@ -1985,7 +1992,7 @@ internal sealed class LauncherForm : Form
         var totalBytes = progress.TotalBytes.GetValueOrDefault();
         if (totalBytes <= 0)
         {
-            _maintenanceCenter?.ReportProgress(null, L("正在准备启动器更新", "Preparing launcher update"));
+            _settingsWorkspace?.ReportProgress(null, L("正在准备启动器更新", "Preparing launcher update"));
             return;
         }
 
@@ -1995,7 +2002,7 @@ internal sealed class LauncherForm : Form
             ? Math.Min(85, (int)Math.Round(sourcePercent * 0.85D, MidpointRounding.AwayFromZero))
             : 85 + (int)Math.Round(sourcePercent * 0.15D, MidpointRounding.AwayFromZero);
         var speed = FormatTransferSpeed(progress.BytesPerSecond);
-        _maintenanceCenter?.ReportProgress(
+        _settingsWorkspace?.ReportProgress(
             Math.Clamp(progressValue, 0, 100),
             progress.Stage == LauncherUpdateProgressStage.Downloading
                 ? L($"正在下载启动器 {sourcePercent}% · {speed}", $"Downloading launcher {sourcePercent}% · {speed}")
@@ -2355,7 +2362,7 @@ internal sealed class LauncherForm : Form
                 _detailUpdateProgress.Visible = false;
             }
             SetRuntimePhase("插件更新流程完成", "Plugin update workflow complete");
-            _maintenanceCenter?.CompleteProgress(L("插件更新流程完成", "Plugin update workflow complete"));
+            _settingsWorkspace?.CompleteProgress(L("插件更新流程完成", "Plugin update workflow complete"));
             RefreshStatus();
         }
     }
@@ -2371,7 +2378,7 @@ internal sealed class LauncherForm : Form
         if (total <= 0)
         {
             _detailUpdateProgress.Style = ProgressBarStyle.Marquee;
-            _maintenanceCenter?.ReportProgress(null, FormatPluginUpdateStatus(progress, _useEnglish));
+            _settingsWorkspace?.ReportProgress(null, FormatPluginUpdateStatus(progress, _useEnglish));
             var unknownTotalSelected = _pluginEntries.FirstOrDefault(entry => entry.Id.Equals(_selectedPluginId, StringComparison.OrdinalIgnoreCase));
             if (_detailStatusLabel is not null && unknownTotalSelected is not null)
             {
@@ -2385,7 +2392,7 @@ internal sealed class LauncherForm : Form
             : 65 + (int)Math.Round(percent * 0.35D, MidpointRounding.AwayFromZero);
         _detailUpdateProgress.Style = ProgressBarStyle.Continuous;
         _detailUpdateProgress.Value = Math.Clamp(value, 0, 100);
-        _maintenanceCenter?.ReportProgress(Math.Clamp(value, 0, 100), FormatPluginUpdateStatus(progress, _useEnglish));
+        _settingsWorkspace?.ReportProgress(Math.Clamp(value, 0, 100), FormatPluginUpdateStatus(progress, _useEnglish));
         var selected = _pluginEntries.FirstOrDefault(entry => entry.Id.Equals(_selectedPluginId, StringComparison.OrdinalIgnoreCase));
         if (_detailStatusLabel is not null && selected is not null)
         {
@@ -2750,7 +2757,7 @@ internal sealed class LauncherForm : Form
 
         var updated = new LauncherSettings
         {
-            SchemaVersion = 4,
+            SchemaVersion = 5,
             DataRoot = dataRootBox.Text.Trim(),
             WooshRoot = _settings.WooshRoot,
             StableRoot = _settings.StableRoot,
@@ -2769,6 +2776,7 @@ internal sealed class LauncherForm : Form
             ,FirstRunCompleted = _settings.FirstRunCompleted
             ,FirstRunWizardStep = _settings.FirstRunWizardStep
             ,FirstRunSelectedPluginIds = _settings.FirstRunSelectedPluginIds
+            ,RuntimeLogHeight = _settings.RuntimeLogHeight
         };
         if (updated.LauncherUpdateChannel != _settings.LauncherUpdateChannel)
         {
@@ -3066,14 +3074,8 @@ internal sealed class LauncherForm : Form
         return new FirstRunInstallOutcome(result.Definition, checks);
     }
 
-    private void ShowMaintenanceCenter()
+    private IReadOnlyList<MaintenanceCategoryDefinition> BuildSettingsCategories()
     {
-        if (_maintenanceCenter is { IsDisposed: false })
-        {
-            _maintenanceCenter.Activate();
-            return;
-        }
-
         Task Run(Action action)
         {
             action();
@@ -3137,9 +3139,6 @@ internal sealed class LauncherForm : Form
             L("安全与设置", "Security & setup"),
             L("管理可信来源、登录凭据和启动器基础配置。", "Manage trusted sources, credentials, and launcher configuration."),
             [
-                new(L("启动器设置", "Launcher settings"),
-                    L("配置数据目录、端口、更新通道和 GitHub 代理。", "Configure storage, ports, update channel, and GitHub proxy."),
-                    L("打开设置", "Open"), Color.FromArgb(31, 121, 108), () => Run(ShowSettingsDialog)),
                 new(L("受信任发布者", "Trusted publishers"),
                     L("查看允许签名插件和目录的发布者密钥。", "Review publisher keys trusted for signed plugins and catalogs."),
                     L("查看", "View"), Color.FromArgb(47, 83, 132), () => Run(ShowTrustedPublishersDialog)),
@@ -3152,13 +3151,222 @@ internal sealed class LauncherForm : Form
                     () => WindowsCredentialStore.Read(ExternalModelAuthorizationService.HuggingFaceCredentialTarget) is not null)
             ]);
 
-        _maintenanceCenter = new MaintenanceCenterForm(
-            [updateAndRecovery, pluginManagement, diagnostics, securityAndSetup],
-            LauncherVersion,
-            _useEnglish);
-        _maintenanceCenter.FormClosed += (_, _) => _maintenanceCenter = null;
-        _maintenanceCenter.Show(this);
-        _maintenanceCenter.CenterOverOwner(this);
+        return [updateAndRecovery, pluginManagement, diagnostics, securityAndSetup];
+    }
+
+    private void ShowSettingsWorkspace(int category = 0)
+    {
+        _settingsWorkspace?.ShowCategory(category);
+    }
+
+    private void ShowPluginWorkspace()
+    {
+        _settingsWorkspace?.Hide();
+        UpdatePluginUi();
+    }
+
+    private Control CreateInlineSettingsCard()
+    {
+        var card = new Panel
+        {
+            Height = 226,
+            BackColor = Color.FromArgb(244, 249, 247),
+            Tag = "settings-card"
+        };
+        var dataRootLabel = new SafeTextLabel
+        {
+            Text = L("数据目录", "Data directory"),
+            Font = new Font("Microsoft YaHei UI", 8.5F, FontStyle.Bold),
+            ForeColor = Theme.Ink,
+            BackColor = card.BackColor
+        };
+        var dataRootBox = new TextBox { Text = _settings.DataRoot, Font = new Font("Microsoft YaHei UI", 8.5F) };
+        var browseButton = CreateWorkspaceButton(L("浏览", "Browse"), Color.FromArgb(47, 83, 132), 74, 30);
+        browseButton.Click += (_, _) =>
+        {
+            using var picker = new FolderBrowserDialog
+            {
+                InitialDirectory = Directory.Exists(dataRootBox.Text) ? dataRootBox.Text : Environment.GetFolderPath(Environment.SpecialFolder.Desktop)
+            };
+            if (picker.ShowDialog(this) == DialogResult.OK)
+            {
+                dataRootBox.Text = picker.SelectedPath;
+            }
+        };
+
+        var proxyLabel = new SafeTextLabel
+        {
+            Text = L("GitHub 代理", "GitHub proxy"),
+            Font = new Font("Microsoft YaHei UI", 8.5F, FontStyle.Bold),
+            ForeColor = Theme.Ink,
+            BackColor = card.BackColor
+        };
+        var proxyBox = new TextBox
+        {
+            Text = _settings.GitHubProxyUrl,
+            PlaceholderText = "http://127.0.0.1:7890",
+            Font = new Font("Microsoft YaHei UI", 8.5F)
+        };
+        var testButton = CreateWorkspaceButton(L("测试连接", "Test"), Color.FromArgb(31, 121, 108), 90, 30);
+        testButton.Click += async (_, _) =>
+        {
+            if (!TryValidateProxyUrl(proxyBox.Text, out _))
+            {
+                MessageBox.Show(L("代理地址应为 http://主机:端口 或 https://主机:端口，且不应包含账号密码。", "Use http://host:port or https://host:port without embedded credentials."), L("代理地址无效", "Invalid proxy"), MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return;
+            }
+            testButton.Enabled = false;
+            try
+            {
+                using var testClient = CreateGitHubClient(proxyBox.Text, TimeSpan.FromSeconds(15));
+                using var response = await testClient.GetAsync(LauncherSelfUpdateService.DefaultManifestUri, HttpCompletionOption.ResponseHeadersRead);
+                response.EnsureSuccessStatusCode();
+                MessageBox.Show(L("GitHub 更新服务连接成功。", "GitHub update service connection succeeded."), L("连接测试", "Connection test"), MessageBoxButtons.OK, MessageBoxIcon.Information);
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show(L("连接失败：", "Connection failed: ") + ex.Message, L("连接测试", "Connection test"), MessageBoxButtons.OK, MessageBoxIcon.Error);
+            }
+            finally
+            {
+                testButton.Enabled = true;
+            }
+        };
+
+        var automaticUpdates = new CheckBox
+        {
+            Text = L("启动时自动检查启动器更新", "Check launcher updates at startup"),
+            Checked = _settings.AutomaticallyCheckLauncherUpdates,
+            Font = new Font("Microsoft YaHei UI", 8.5F),
+            ForeColor = Theme.Ink,
+            BackColor = card.BackColor,
+            AutoSize = true
+        };
+        var channelLabel = new SafeTextLabel
+        {
+            Text = L("更新通道", "Update channel"),
+            Font = new Font("Microsoft YaHei UI", 8.5F, FontStyle.Bold),
+            ForeColor = Theme.Ink,
+            BackColor = card.BackColor
+        };
+        var channelBox = new ComboBox
+        {
+            DropDownStyle = ComboBoxStyle.DropDownList,
+            Font = new Font("Microsoft YaHei UI", 8.5F)
+        };
+        channelBox.Items.AddRange([L("稳定版", "Stable"), L("预览版", "Preview")]);
+        channelBox.SelectedIndex = _settings.LauncherUpdateChannel == LauncherUpdateChannel.Preview ? 1 : 0;
+        var saveButton = CreateWorkspaceButton(L("保存设置", "Save settings"), Theme.DeepTeal, 116, 34);
+        saveButton.Click += (_, _) => SaveInlineSettings(dataRootBox.Text, proxyBox.Text, automaticUpdates.Checked, channelBox.SelectedIndex == 1);
+
+        card.Controls.AddRange([dataRootLabel, dataRootBox, browseButton, proxyLabel, proxyBox, testButton, automaticUpdates, channelLabel, channelBox, saveButton]);
+        void LayoutCard()
+        {
+            var inputLeft = 136;
+            var right = card.ClientSize.Width - 16;
+            dataRootLabel.SetBounds(16, 18, 108, 26);
+            browseButton.Location = new Point(right - browseButton.Width, 16);
+            dataRootBox.SetBounds(inputLeft, 18, Math.Max(120, browseButton.Left - inputLeft - 8), 26);
+            proxyLabel.SetBounds(16, 58, 108, 26);
+            testButton.Location = new Point(right - testButton.Width, 56);
+            proxyBox.SetBounds(inputLeft, 58, Math.Max(120, testButton.Left - inputLeft - 8), 26);
+            automaticUpdates.Location = new Point(16, 104);
+            channelLabel.SetBounds(16, 140, 108, 26);
+            channelBox.SetBounds(inputLeft, 140, 148, 28);
+            saveButton.Location = new Point(right - saveButton.Width, 178);
+        }
+        card.SizeChanged += (_, _) => LayoutCard();
+        LayoutCard();
+        return card;
+    }
+
+    private void SaveInlineSettings(string dataRoot, string proxyUrl, bool automaticallyCheckUpdates, bool usePreviewChannel)
+    {
+        if (string.IsNullOrWhiteSpace(dataRoot))
+        {
+            MessageBox.Show(L("数据目录不能为空。", "The data directory cannot be empty."), L("无法保存", "Cannot save"), MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            return;
+        }
+        if (!TryValidateProxyUrl(proxyUrl, out _))
+        {
+            MessageBox.Show(L("代理地址格式无效。", "The proxy URL is invalid."), L("无法保存", "Cannot save"), MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            return;
+        }
+
+        var channel = usePreviewChannel ? LauncherUpdateChannel.Preview : LauncherUpdateChannel.Stable;
+        _settings.DataRoot = dataRoot.Trim();
+        _settings.GitHubProxyUrl = proxyUrl.Trim();
+        _settings.AutomaticallyCheckLauncherUpdates = automaticallyCheckUpdates;
+        if (_settings.LauncherUpdateChannel != channel)
+        {
+            _settings.SkippedLauncherVersion = string.Empty;
+            _settings.LauncherUpdateDeferredUntil = null;
+        }
+        _settings.LauncherUpdateChannel = channel;
+        NormalizeSettings(_settings);
+        EnsureDataDirectories(_settings);
+        SaveSettings(_settings);
+        ConfigureGitHubServices(_settings.GitHubProxyUrl);
+        SaveModelCatalog(_modelCatalog);
+        ConfigureProfiles();
+        _selectedStableProfile ??= _smallSfx;
+        Controls.Clear();
+        InitializeUi();
+        BeginInvoke(new Action(() =>
+        {
+            ShowSettingsWorkspace(3);
+            RefreshStatus();
+            AppendLog(L("启动器设置已保存。", "Launcher settings saved."));
+        }));
+    }
+
+    private void BeginLogWindowResize(object? sender, MouseEventArgs eventArgs)
+    {
+        if (eventArgs.Button != MouseButtons.Left || _logHost is null || _logResizeGrip is null)
+        {
+            return;
+        }
+
+        _resizingLogWindow = true;
+        _logResizeStartScreenY = _logResizeGrip.PointToScreen(eventArgs.Location).Y;
+        _logResizeStartHeight = Height;
+        _logResizeStartLogHeight = _logHost.Height;
+        _logResizeGrip.Capture = true;
+    }
+
+    private void ResizeLogWindow(object? sender, MouseEventArgs eventArgs)
+    {
+        if (!_resizingLogWindow || _logHost is null)
+        {
+            return;
+        }
+
+        var delta = _logResizeStartScreenY - Cursor.Position.Y;
+        var workingArea = Screen.FromControl(this).WorkingArea;
+        var maximumWindowHeight = Math.Max(MinimumSize.Height, workingArea.Bottom - Top - 8);
+        var targetWindowHeight = Math.Clamp(_logResizeStartHeight + delta, MinimumSize.Height, maximumWindowHeight);
+        var actualDelta = targetWindowHeight - _logResizeStartHeight;
+        Height = targetWindowHeight;
+        _logHost.Height = Math.Max(180, _logResizeStartLogHeight + actualDelta);
+    }
+
+    private void EndLogWindowResize(object? sender, MouseEventArgs eventArgs)
+    {
+        if (!_resizingLogWindow)
+        {
+            return;
+        }
+
+        _resizingLogWindow = false;
+        if (_logResizeGrip is not null)
+        {
+            _logResizeGrip.Capture = false;
+        }
+        if (_logHost is not null)
+        {
+            _settings.RuntimeLogHeight = Math.Clamp(_logHost.Height, 180, 480);
+            SaveSettings(_settings);
+        }
     }
 
     private bool CanUpdateSelectedPlugin()
@@ -4148,7 +4356,7 @@ internal sealed class LauncherForm : Form
         Text = "BaChen AI Launcher";
         StartPosition = FormStartPosition.CenterScreen;
         MinimumSize = new Size(1280, 900);
-        Size = new Size(1440, 960);
+        Size = new Size(1440, 1020);
         Font = new Font("Microsoft YaHei UI", 10F);
         BackColor = Color.FromArgb(229, 237, 234);
         _pluginItems.Clear();
@@ -4179,10 +4387,6 @@ internal sealed class LauncherForm : Form
         gpuPanel.Controls.Add(_gpuMeter);
         header.Controls.Add(gpuPanel);
 
-        var toolsButton = CreateActionButton(L("工具", "Tools"), Color.FromArgb(37, 110, 103), 96);
-        toolsButton.Height = 36;
-        toolsButton.Click += (_, _) => ShowMaintenanceCenter();
-        header.Controls.Add(toolsButton);
         var languageButton = CreateActionButton(_useEnglish ? "中文" : "EN", Color.FromArgb(53, 127, 118), 74);
         languageButton.Height = 36;
         languageButton.Click += (_, _) => ToggleLanguage();
@@ -4192,9 +4396,7 @@ internal sealed class LauncherForm : Form
         {
             languageButton.Left = header.ClientSize.Width - languageButton.Width - 24;
             languageButton.Top = 23;
-            toolsButton.Left = languageButton.Left - toolsButton.Width - 10;
-            toolsButton.Top = 23;
-            gpuPanel.Left = toolsButton.Left - gpuPanel.Width - 24;
+            gpuPanel.Left = languageButton.Left - gpuPanel.Width - 24;
             gpuPanel.Top = 15;
             _phaseLabel.Width = Math.Max(230, gpuPanel.Left - _phaseLabel.Left - 24);
         }
@@ -4203,10 +4405,21 @@ internal sealed class LauncherForm : Form
         _logHost = new Panel
         {
             Dock = DockStyle.Bottom,
-            Height = 170,
+            Height = Math.Clamp(_settings.RuntimeLogHeight, 180, 480),
             BackColor = BackColor,
-            Padding = new Padding(12, 4, 12, 8)
+            Padding = new Padding(12, 10, 12, 8)
         };
+        _logResizeGrip = new Panel
+        {
+            Dock = DockStyle.Top,
+            Height = 6,
+            Cursor = Cursors.SizeNS,
+            BackColor = Color.FromArgb(190, 211, 205)
+        };
+        _logResizeGrip.MouseDown += BeginLogWindowResize;
+        _logResizeGrip.MouseMove += ResizeLogWindow;
+        _logResizeGrip.MouseUp += EndLogWindowResize;
+        _logHost.Controls.Add(_logResizeGrip);
         var logCard = new RoundedPanel
         {
             Dock = DockStyle.Fill,
@@ -4332,20 +4545,13 @@ internal sealed class LauncherForm : Form
         navigation.Controls.Add(CreateText(L("工作区", "WORKSPACE"), new Rectangle(20, 18, 145, 24), 8F, Color.FromArgb(155, 205, 196), FontStyle.Bold));
         var pluginsButton = CreateActionButton(L("插件", "Plugins"), Color.FromArgb(37, 125, 115), 140);
         pluginsButton.Location = new Point(20, 54);
-        var updatesButton = CreateActionButton(L("检查更新", "Updates"), Color.FromArgb(31, 91, 87), 140);
-        updatesButton.Location = new Point(20, 102);
-        updatesButton.Click += async (_, _) => await CheckUpdatesAsync();
-        var healthButton = CreateActionButton(L("环境自检", "Health check"), Color.FromArgb(31, 91, 87), 140);
-        healthButton.Location = new Point(20, 150);
-        healthButton.Click += (_, _) => ShowEnvironmentReport();
         var settingsButton = CreateActionButton(L("设置", "Settings"), Color.FromArgb(31, 91, 87), 140);
-        settingsButton.Location = new Point(20, 198);
-        settingsButton.Click += (_, _) => ShowSettingsDialog();
+        settingsButton.Location = new Point(20, 102);
+        settingsButton.Click += (_, _) => ShowSettingsWorkspace();
+        pluginsButton.Click += (_, _) => ShowPluginWorkspace();
         navigation.Controls.Add(pluginsButton);
-        navigation.Controls.Add(updatesButton);
-        navigation.Controls.Add(healthButton);
         navigation.Controls.Add(settingsButton);
-        var workspaceButtons = new[] { pluginsButton, updatesButton, healthButton, settingsButton };
+        var workspaceButtons = new[] { pluginsButton, settingsButton };
         void LayoutWorkspaceButtons()
         {
             var buttonWidth = Math.Min(140, Math.Max(116, navigation.ClientSize.Width - 28));
@@ -4358,8 +4564,8 @@ internal sealed class LauncherForm : Form
         }
         navigation.SizeChanged += (_, _) => LayoutWorkspaceButtons();
         LayoutWorkspaceButtons();
-        navigation.Controls.Add(CreateText(L("单模型安全模式", "SINGLE MODEL MODE"), new Rectangle(20, 270, 150, 25), 8F, Color.FromArgb(159, 211, 201), FontStyle.Bold));
-        navigation.Controls.Add(CreateParagraph(L("启动新插件前会检查端口与显存占用。", "Ports and GPU memory are checked before launch."), new Rectangle(20, 302, 150, 72), 8F, Color.FromArgb(202, 229, 223), FontStyle.Regular));
+        navigation.Controls.Add(CreateText(L("单模型安全模式", "SINGLE MODEL MODE"), new Rectangle(20, 174, 150, 25), 8F, Color.FromArgb(159, 211, 201), FontStyle.Bold));
+        navigation.Controls.Add(CreateParagraph(L("启动新插件前会检查端口与显存占用。", "Ports and GPU memory are checked before launch."), new Rectangle(20, 206, 150, 72), 8F, Color.FromArgb(202, 229, 223), FontStyle.Regular));
         mainShell.Controls.Add(navigation, 0, 0);
 
         var pluginPanel = new RoundedPanel
@@ -4565,6 +4771,12 @@ internal sealed class LauncherForm : Form
             LayoutPluginActionButtons();
             LayoutDetailActionArea(_detailUpdateButton?.Visible == true);
         };
+        _settingsWorkspace = new SettingsWorkspace(
+            BuildSettingsCategories(),
+            LauncherVersion,
+            _useEnglish,
+            CreateInlineSettingsCard);
+        detailPanel.Controls.Add(_settingsWorkspace);
         mainShell.Controls.Add(detailPanel, 2, 0);
 
         Controls.Add(mainShell);
@@ -4672,6 +4884,7 @@ internal sealed class LauncherForm : Form
 
     private void SelectPlugin(string id)
     {
+        _settingsWorkspace?.Hide();
         _selectedPluginId = id;
         foreach (var pair in _pluginItems)
         {
@@ -5049,7 +5262,7 @@ internal sealed class LauncherForm : Form
         var maintenanceButton = CreateActionButton(L("维护工具", "Tools"), Color.FromArgb(40, 108, 126), 116);
         maintenanceButton.Location = new Point(712, 28);
         maintenanceButton.Height = 36;
-        maintenanceButton.Click += (_, _) => ShowMaintenanceCenter();
+        maintenanceButton.Click += (_, _) => ShowSettingsWorkspace();
         header.Controls.Add(maintenanceButton);
 
         var hero = new RoundedPanel
@@ -5375,6 +5588,20 @@ internal sealed class LauncherForm : Form
             Margin = new Padding(0),
             FillColor = color,
             ForeColor = Color.White
+        };
+    }
+
+    private static SafeTextLabel CreateWorkspaceButton(string text, Color color, int width, int height)
+    {
+        return new SafeTextLabel
+        {
+            Text = text,
+            Size = new Size(width, height),
+            BackColor = color,
+            ForeColor = Color.White,
+            TextAlign = ContentAlignment.MiddleCenter,
+            Cursor = Cursors.Hand,
+            Font = new Font("Microsoft YaHei UI", 8.5F, FontStyle.Bold)
         };
     }
 

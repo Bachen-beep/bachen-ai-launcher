@@ -40,7 +40,7 @@ internal static class LauncherPaths
 
 internal sealed class LauncherSettings
 {
-    public int SchemaVersion { get; set; } = 4;
+    public int SchemaVersion { get; set; } = 5;
     public string DataRoot { get; set; } = LauncherPaths.DefaultDataDirectory;
     public string WooshRoot { get; set; } = Path.Combine(LauncherPaths.DefaultDataDirectory, "plugins", "Woosh");
     public string StableRoot { get; set; } = Path.Combine(LauncherPaths.DefaultDataDirectory, "plugins", "Stable Audio 3");
@@ -59,6 +59,7 @@ internal sealed class LauncherSettings
     public bool FirstRunCompleted { get; set; } = true;
     public int FirstRunWizardStep { get; set; }
     public string[] FirstRunSelectedPluginIds { get; set; } = [];
+    public int RuntimeLogHeight { get; set; } = 230;
 }
 
 internal enum LauncherUpdateChannel
