@@ -1,4 +1,32 @@
+using System.Diagnostics;
+
 namespace BaChenAiLauncher;
+
+internal sealed class TransferRateTracker
+{
+    private readonly Stopwatch _stopwatch;
+    private readonly Func<TimeSpan> _elapsedProvider;
+    private long _lastBytes;
+    private TimeSpan _lastSampleAt;
+
+    public TransferRateTracker(Func<TimeSpan>? elapsedProvider = null)
+    {
+        _stopwatch = Stopwatch.StartNew();
+        _elapsedProvider = elapsedProvider ?? (() => _stopwatch.Elapsed);
+    }
+
+    public double? Sample(long completedBytes)
+    {
+        var sampledAt = _elapsedProvider();
+        var elapsedSeconds = (sampledAt - _lastSampleAt).TotalSeconds;
+        var bytesPerSecond = elapsedSeconds > 0
+            ? (completedBytes - _lastBytes) / elapsedSeconds
+            : (double?)null;
+        _lastBytes = completedBytes;
+        _lastSampleAt = sampledAt;
+        return bytesPerSecond is > 0 ? bytesPerSecond : null;
+    }
+}
 
 internal sealed record GitHubUpdateSource(
     string DisplayName,
@@ -27,7 +55,8 @@ internal enum SourceUpdateProgressStage
 internal sealed record SourceUpdateProgress(
     SourceUpdateProgressStage Stage,
     long Completed,
-    long? Total);
+    long? Total,
+    double? BytesPerSecond = null);
 
 internal sealed record UpdateBackupEntry(GitHubUpdateSource Source, string Path, DateTime LastWriteTime);
 

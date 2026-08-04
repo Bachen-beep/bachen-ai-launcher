@@ -117,6 +117,58 @@ internal static class PaintSurface
     }
 }
 
+internal static class GlassPaint
+{
+    public static void DrawReflection(
+        Graphics graphics,
+        GraphicsPath clipPath,
+        Rectangle bounds,
+        int topOpacity,
+        float sheenProgress = -1F,
+        int sheenOpacity = 0)
+    {
+        if (bounds.Width <= 1 || bounds.Height <= 1)
+        {
+            return;
+        }
+
+        var state = graphics.Save();
+        graphics.SetClip(clipPath);
+        var highlightBounds = new Rectangle(bounds.Left, bounds.Top, bounds.Width, Math.Max(2, bounds.Height / 2));
+        using (var highlight = new LinearGradientBrush(
+                   highlightBounds,
+                   Color.FromArgb(Math.Clamp(topOpacity, 0, 255), Color.White),
+                   Color.FromArgb(0, Color.White),
+                   LinearGradientMode.Vertical))
+        {
+            graphics.FillRectangle(highlight, highlightBounds);
+        }
+
+        if (sheenProgress >= 0F && sheenOpacity > 0)
+        {
+            var stripWidth = Math.Max(24, bounds.Width / 5);
+            var stripLeft = bounds.Left - stripWidth +
+                (int)Math.Round((bounds.Width + stripWidth * 2D) * Math.Clamp(sheenProgress, 0F, 1F));
+            var stripBounds = new Rectangle(stripLeft, bounds.Top, stripWidth, bounds.Height);
+            using var sheen = new LinearGradientBrush(stripBounds, Color.Transparent, Color.Transparent, 0F);
+            sheen.InterpolationColors = new ColorBlend
+            {
+                Positions = [0F, 0.42F, 0.5F, 0.58F, 1F],
+                Colors =
+                [
+                    Color.Transparent,
+                    Color.FromArgb(0, Color.White),
+                    Color.FromArgb(Math.Clamp(sheenOpacity, 0, 255), Color.White),
+                    Color.FromArgb(0, Color.White),
+                    Color.Transparent
+                ]
+            };
+            graphics.FillRectangle(sheen, stripBounds);
+        }
+        graphics.Restore(state);
+    }
+}
+
 internal sealed class RoundedPanel : Panel
 {
     public int CornerRadius { get; init; } = 18;
@@ -177,35 +229,39 @@ internal sealed class RoundedPanel : Panel
 
 internal sealed class RoundedButton : Control
 {
+    private readonly System.Windows.Forms.Timer _animationTimer = new() { Interval = 16 };
     public Color FillColor { get; init; } = Theme.DeepTeal;
-    private bool _hovered;
     private bool _pressed;
+    private float _hoverProgress;
+    private float _hoverTarget;
 
     public RoundedButton()
     {
         Cursor = Cursors.Hand;
         SetStyle(ControlStyles.AllPaintingInWmPaint | ControlStyles.OptimizedDoubleBuffer | ControlStyles.ResizeRedraw | ControlStyles.UserPaint, true);
         TabStop = true;
+        _animationTimer.Tick += (_, _) => AnimateHover();
     }
 
     protected override void OnMouseEnter(EventArgs e)
     {
-        _hovered = true;
-        Invalidate();
+        _hoverTarget = 1F;
+        _animationTimer.Start();
         base.OnMouseEnter(e);
     }
 
     protected override void OnMouseLeave(EventArgs e)
     {
-        _hovered = false;
+        _hoverTarget = 0F;
         _pressed = false;
-        Invalidate();
+        _animationTimer.Start();
         base.OnMouseLeave(e);
     }
 
     protected override void OnMouseDown(MouseEventArgs e)
     {
-        _pressed = true;
+        _pressed = Enabled && e.Button == MouseButtons.Left;
+        if (_pressed) Focus();
         Invalidate();
         base.OnMouseDown(e);
     }
@@ -221,21 +277,120 @@ internal sealed class RoundedButton : Control
     {
         e.Graphics.Clear(PaintSurface.ResolveParentColor(this));
         e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
+        var pressOffset = _pressed ? 1 : 0;
         var color = !Enabled
             ? Color.FromArgb(176, 190, 187)
             : _pressed ? ControlPaint.Dark(FillColor, 0.14F)
-            : _hovered ? ControlPaint.Light(FillColor, 0.08F)
-            : FillColor;
-        using var path = CreatePillPath(new Rectangle(0, 0, Width - 1, Height - 1));
+            : Blend(FillColor, Color.White, _hoverProgress * 0.08F);
+        var bodyBounds = new Rectangle(0, pressOffset, Width - 1, Height - 1 - pressOffset);
+        using var path = CreatePillPath(bodyBounds);
         using var brush = new SolidBrush(color);
         e.Graphics.FillPath(brush, path);
+        GlassPaint.DrawReflection(
+            e.Graphics,
+            path,
+            bodyBounds,
+            Enabled ? 22 + (int)Math.Round(_hoverProgress * 18) : 10,
+            _hoverProgress,
+            Enabled ? (int)Math.Round(_hoverProgress * 54) : 0);
+        using var innerBorder = new Pen(Color.FromArgb(Enabled ? 48 : 20, Color.White), 1F);
+        e.Graphics.DrawPath(innerBorder, path);
+        if (Focused && Enabled)
+        {
+            using var focusPath = CreatePillPath(Rectangle.Inflate(bodyBounds, -3, -3));
+            using var focusPen = new Pen(Color.FromArgb(150, Color.White), 1.2F);
+            e.Graphics.DrawPath(focusPen, focusPath);
+        }
         PaintSurface.DrawText(
             e.Graphics,
             Text,
             Font,
-            PaintSurface.TextBounds(ClientRectangle),
+            PaintSurface.TextBounds(new Rectangle(0, pressOffset, Width, Height - pressOffset)),
             Enabled ? ForeColor : Color.FromArgb(245, 248, 247),
             StringAlignment.Center);
+    }
+
+    protected override void OnEnabledChanged(EventArgs e)
+    {
+        if (!Enabled)
+        {
+            _pressed = false;
+            _hoverTarget = 0F;
+            _animationTimer.Stop();
+            _hoverProgress = 0F;
+        }
+        Invalidate();
+        base.OnEnabledChanged(e);
+    }
+
+    protected override void OnGotFocus(EventArgs e)
+    {
+        Invalidate();
+        base.OnGotFocus(e);
+    }
+
+    protected override void OnLostFocus(EventArgs e)
+    {
+        _pressed = false;
+        Invalidate();
+        base.OnLostFocus(e);
+    }
+
+    protected override void OnKeyDown(KeyEventArgs e)
+    {
+        if (Enabled && e.KeyCode is Keys.Enter or Keys.Space)
+        {
+            _pressed = true;
+            e.Handled = true;
+            Invalidate();
+        }
+        base.OnKeyDown(e);
+    }
+
+    protected override void OnKeyUp(KeyEventArgs e)
+    {
+        if (_pressed && e.KeyCode is Keys.Enter or Keys.Space)
+        {
+            _pressed = false;
+            e.Handled = true;
+            Invalidate();
+            OnClick(EventArgs.Empty);
+        }
+        base.OnKeyUp(e);
+    }
+
+    protected override void Dispose(bool disposing)
+    {
+        if (disposing)
+        {
+            _animationTimer.Dispose();
+        }
+        base.Dispose(disposing);
+    }
+
+    private void AnimateHover()
+    {
+        var delta = _hoverTarget - _hoverProgress;
+        if (Math.Abs(delta) <= 0.02F)
+        {
+            _hoverProgress = _hoverTarget;
+            _animationTimer.Stop();
+        }
+        else
+        {
+            _hoverProgress = Math.Clamp(_hoverProgress + Math.Sign(delta) * 0.12F, 0F, 1F);
+        }
+        Invalidate();
+    }
+
+    private static Color Blend(Color from, Color to, float amount)
+    {
+        amount = Math.Clamp(amount, 0F, 1F);
+        return Color.FromArgb(
+            from.A,
+            (int)Math.Round(from.R + (to.R - from.R) * amount),
+            (int)Math.Round(from.G + (to.G - from.G) * amount),
+            (int)Math.Round(from.B + (to.B - from.B) * amount));
     }
 
     private static GraphicsPath CreatePillPath(Rectangle bounds)
@@ -624,6 +779,7 @@ internal sealed class PluginListItem : Control
     public PluginListItem()
     {
         Cursor = Cursors.Hand;
+        TabStop = true;
         SetStyle(ControlStyles.AllPaintingInWmPaint | ControlStyles.OptimizedDoubleBuffer | ControlStyles.ResizeRedraw | ControlStyles.UserPaint, true);
         _animationTimer.Tick += (_, _) => Animate();
     }
@@ -651,6 +807,34 @@ internal sealed class PluginListItem : Control
         }
     }
 
+    protected override void OnMouseDown(MouseEventArgs e)
+    {
+        if (e.Button == MouseButtons.Left) Focus();
+        base.OnMouseDown(e);
+    }
+
+    protected override void OnKeyUp(KeyEventArgs e)
+    {
+        if (e.KeyCode is Keys.Enter or Keys.Space)
+        {
+            e.Handled = true;
+            InvokeAction?.Invoke();
+        }
+        base.OnKeyUp(e);
+    }
+
+    protected override void OnGotFocus(EventArgs e)
+    {
+        Invalidate();
+        base.OnGotFocus(e);
+    }
+
+    protected override void OnLostFocus(EventArgs e)
+    {
+        Invalidate();
+        base.OnLostFocus(e);
+    }
+
     protected override void OnPaintBackground(PaintEventArgs e)
     {
         e.Graphics.Clear(PaintSurface.ResolveParentColor(this));
@@ -665,7 +849,14 @@ internal sealed class PluginListItem : Control
         using var body = RoundedPath(new Rectangle(1, 1, Width - 3, Height - 3), 12);
         using var brush = new SolidBrush(fill);
         e.Graphics.FillPath(brush, body);
-        using var border = new Pen(_selected ? AccentColor : Color.FromArgb(210, 225, 220), _selected ? 2F : 1F);
+        GlassPaint.DrawReflection(
+            e.Graphics,
+            body,
+            new Rectangle(1, 1, Width - 3, Height - 3),
+            _selected ? 38 : 24 + (int)Math.Round(_hoverProgress * 14),
+            _hoverProgress,
+            (int)Math.Round(_hoverProgress * 34));
+        using var border = new Pen(_selected || Focused ? AccentColor : Color.FromArgb(210, 225, 220), _selected || Focused ? 2F : 1F);
         e.Graphics.DrawPath(border, body);
 
         using var accent = new SolidBrush(AccentColor);
@@ -708,6 +899,187 @@ internal sealed class PluginListItem : Control
     {
         var path = new GraphicsPath();
         var diameter = Math.Min(radius * 2, Math.Min(bounds.Width, bounds.Height));
+        path.AddArc(bounds.Left, bounds.Top, diameter, diameter, 180, 90);
+        path.AddArc(bounds.Right - diameter, bounds.Top, diameter, diameter, 270, 90);
+        path.AddArc(bounds.Right - diameter, bounds.Bottom - diameter, diameter, diameter, 0, 90);
+        path.AddArc(bounds.Left, bounds.Bottom - diameter, diameter, diameter, 90, 90);
+        path.CloseFigure();
+        return path;
+    }
+}
+
+internal sealed class GlassProgressBar : Control
+{
+    private readonly System.Windows.Forms.Timer _animationTimer = new() { Interval = 28 };
+    private int _minimum;
+    private int _maximum = 100;
+    private int _value;
+    private ProgressBarStyle _style = ProgressBarStyle.Continuous;
+    private float _animationProgress;
+
+    public Color TrackColor { get; init; } = Color.FromArgb(220, 234, 230);
+    public Color FillColor { get; init; } = Color.FromArgb(36, 145, 124);
+    public Color BorderColor { get; init; } = Color.FromArgb(145, 188, 178);
+
+    public int Minimum
+    {
+        get => _minimum;
+        set
+        {
+            _minimum = value;
+            if (_maximum <= _minimum) _maximum = _minimum + 1;
+            Value = _value;
+        }
+    }
+
+    public int Maximum
+    {
+        get => _maximum;
+        set
+        {
+            _maximum = Math.Max(_minimum + 1, value);
+            Value = _value;
+        }
+    }
+
+    public int Value
+    {
+        get => _value;
+        set
+        {
+            var next = Math.Clamp(value, _minimum, _maximum);
+            if (_value == next) return;
+            _value = next;
+            UpdateAnimationState();
+            Invalidate();
+        }
+    }
+
+    public ProgressBarStyle Style
+    {
+        get => _style;
+        set
+        {
+            if (_style == value) return;
+            _style = value;
+            UpdateAnimationState();
+            Invalidate();
+        }
+    }
+
+    public int MarqueeAnimationSpeed
+    {
+        get => _animationTimer.Interval;
+        set => _animationTimer.Interval = Math.Clamp(value, 16, 100);
+    }
+
+    public GlassProgressBar()
+    {
+        SetStyle(ControlStyles.AllPaintingInWmPaint | ControlStyles.OptimizedDoubleBuffer | ControlStyles.ResizeRedraw | ControlStyles.UserPaint, true);
+        _animationTimer.Tick += (_, _) =>
+        {
+            _animationProgress += _style == ProgressBarStyle.Marquee ? 0.045F : 0.018F;
+            if (_animationProgress > 1F) _animationProgress -= 1F;
+            Invalidate();
+        };
+    }
+
+    protected override void OnVisibleChanged(EventArgs e)
+    {
+        UpdateAnimationState();
+        base.OnVisibleChanged(e);
+    }
+
+    protected override void OnHandleCreated(EventArgs e)
+    {
+        base.OnHandleCreated(e);
+        UpdateAnimationState();
+    }
+
+    protected override void OnHandleDestroyed(EventArgs e)
+    {
+        _animationTimer.Stop();
+        base.OnHandleDestroyed(e);
+    }
+
+    protected override void OnEnabledChanged(EventArgs e)
+    {
+        UpdateAnimationState();
+        Invalidate();
+        base.OnEnabledChanged(e);
+    }
+
+    protected override void OnPaint(PaintEventArgs e)
+    {
+        e.Graphics.Clear(PaintSurface.ResolveParentColor(this));
+        e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
+        if (Width <= 2 || Height <= 2)
+        {
+            return;
+        }
+
+        var bounds = new Rectangle(0, 0, Width - 1, Height - 1);
+        using var trackPath = RoundedPath(bounds, Height / 2);
+        using var trackBrush = new SolidBrush(Enabled ? TrackColor : ControlPaint.Light(TrackColor, 0.3F));
+        e.Graphics.FillPath(trackBrush, trackPath);
+        GlassPaint.DrawReflection(e.Graphics, trackPath, bounds, 38);
+
+        var state = e.Graphics.Save();
+        e.Graphics.SetClip(trackPath);
+        if (_style == ProgressBarStyle.Marquee)
+        {
+            var segmentWidth = Math.Max(Height * 3, Width / 3);
+            var segmentLeft = -segmentWidth + (int)Math.Round((Width + segmentWidth) * _animationProgress);
+            PaintFill(e.Graphics, new Rectangle(segmentLeft, 0, segmentWidth, Height - 1));
+        }
+        else
+        {
+            var ratio = Math.Clamp((_value - _minimum) / (double)(_maximum - _minimum), 0D, 1D);
+            var fillWidth = (int)Math.Round(bounds.Width * ratio);
+            if (fillWidth > 0)
+            {
+                PaintFill(e.Graphics, new Rectangle(0, 0, Math.Max(Height, fillWidth), Height - 1));
+            }
+        }
+        e.Graphics.Restore(state);
+
+        using var border = new Pen(BorderColor, 1F);
+        e.Graphics.DrawPath(border, trackPath);
+    }
+
+    protected override void Dispose(bool disposing)
+    {
+        if (disposing)
+        {
+            _animationTimer.Dispose();
+        }
+        base.Dispose(disposing);
+    }
+
+    private void PaintFill(Graphics graphics, Rectangle fillBounds)
+    {
+        using var fillPath = RoundedPath(fillBounds, Height / 2);
+        using var fillBrush = new SolidBrush(Enabled ? FillColor : ControlPaint.Light(FillColor, 0.3F));
+        graphics.FillPath(fillBrush, fillPath);
+        GlassPaint.DrawReflection(graphics, fillPath, fillBounds, 72, _animationProgress, 82);
+    }
+
+    private void UpdateAnimationState()
+    {
+        if (IsHandleCreated && Visible && Enabled && (_style == ProgressBarStyle.Marquee || _value > _minimum))
+        {
+            _animationTimer.Start();
+        }
+        else
+        {
+            _animationTimer.Stop();
+        }
+    }
+
+    private static GraphicsPath RoundedPath(Rectangle bounds, int radius)
+    {
+        var path = new GraphicsPath();
+        var diameter = Math.Max(2, Math.Min(radius * 2, Math.Min(bounds.Width, bounds.Height)));
         path.AddArc(bounds.Left, bounds.Top, diameter, diameter, 180, 90);
         path.AddArc(bounds.Right - diameter, bounds.Top, diameter, diameter, 270, 90);
         path.AddArc(bounds.Right - diameter, bounds.Bottom - diameter, diameter, diameter, 0, 90);
@@ -806,7 +1178,12 @@ internal sealed class LauncherForm : Form
 
     private readonly SafeTextLabel _statusLabel = new();
     private readonly SafeTextLabel _phaseLabel = new();
-    private readonly ProgressBar _launcherUpdateProgress = new();
+    private readonly GlassProgressBar _launcherUpdateProgress = new()
+    {
+        TrackColor = Color.FromArgb(31, 99, 94),
+        FillColor = Color.FromArgb(105, 220, 181),
+        BorderColor = Color.FromArgb(87, 166, 151)
+    };
     private bool _launcherUpdateInProgress;
     private LauncherUpdateProgress? _latestLauncherUpdateProgress;
     private readonly RichTextBox _log = new();
@@ -822,7 +1199,10 @@ internal sealed class LauncherForm : Form
     private RoundedButton? _detailUpdateButton;
     private RoundedButton? _detailStopButton;
     private RoundedButton? _detailUninstallButton;
-    private ProgressBar? _detailUpdateProgress;
+    private GlassProgressBar? _detailUpdateProgress;
+    private bool _pluginUpdateInProgress;
+    private string? _updatingPluginId;
+    private SourceUpdateProgress? _latestPluginUpdateProgress;
     private ParagraphLabel? _detailActionHint;
     private RoundedButton? _logToggleButton;
     private SafeTextLabel? _gpuSummaryLabel;
@@ -1081,7 +1461,6 @@ internal sealed class LauncherForm : Form
         _pluginCategory = "*";
         Controls.Clear();
         InitializeUi();
-        _openButton.Enabled = _activeService is not null;
         RefreshStatus();
     }
 
@@ -1890,6 +2269,9 @@ internal sealed class LauncherForm : Form
         }
 
         _updateBusy = true;
+        _pluginUpdateInProgress = true;
+        _updatingPluginId = selected.Id;
+        _latestPluginUpdateProgress = null;
         try
         {
             if (runningPids.Count > 0)
@@ -1922,6 +2304,13 @@ internal sealed class LauncherForm : Form
         finally
         {
             _updateBusy = false;
+            _pluginUpdateInProgress = false;
+            _updatingPluginId = null;
+            _latestPluginUpdateProgress = null;
+            if (_detailUpdateProgress is not null)
+            {
+                _detailUpdateProgress.Visible = false;
+            }
             SetRuntimePhase("插件更新流程完成", "Plugin update workflow complete");
             RefreshStatus();
         }
@@ -1929,7 +2318,8 @@ internal sealed class LauncherForm : Form
 
     private void UpdateSelectedPluginProgress(SourceUpdateProgress progress)
     {
-        if (_detailUpdateProgress is null)
+        _latestPluginUpdateProgress = progress;
+        if (_detailUpdateProgress is null || !_selectedPluginId.Equals(_updatingPluginId, StringComparison.OrdinalIgnoreCase))
         {
             return;
         }
@@ -1937,6 +2327,11 @@ internal sealed class LauncherForm : Form
         if (total <= 0)
         {
             _detailUpdateProgress.Style = ProgressBarStyle.Marquee;
+            var unknownTotalSelected = _pluginEntries.FirstOrDefault(entry => entry.Id.Equals(_selectedPluginId, StringComparison.OrdinalIgnoreCase));
+            if (_detailStatusLabel is not null && unknownTotalSelected is not null)
+            {
+                _detailStatusLabel.Text = FormatPluginUpdateStatus(progress, _useEnglish);
+            }
             return;
         }
         var percent = (int)Math.Round(Math.Clamp(progress.Completed, 0, total) * 100D / total, MidpointRounding.AwayFromZero);
@@ -1948,10 +2343,25 @@ internal sealed class LauncherForm : Form
         var selected = _pluginEntries.FirstOrDefault(entry => entry.Id.Equals(_selectedPluginId, StringComparison.OrdinalIgnoreCase));
         if (_detailStatusLabel is not null && selected is not null)
         {
-            _detailStatusLabel.Text = progress.Stage == SourceUpdateProgressStage.Downloading
-                ? L($"正在下载更新 {percent}%", $"Downloading update {percent}%")
-                : L($"正在替换源码 {percent}%", $"Replacing source {percent}%");
+            _detailStatusLabel.Text = FormatPluginUpdateStatus(progress, _useEnglish);
         }
+    }
+
+    internal static string FormatPluginUpdateStatus(SourceUpdateProgress progress, bool useEnglish)
+    {
+        var total = progress.Total.GetValueOrDefault();
+        var percentText = total > 0
+            ? $" {Math.Round(Math.Clamp(progress.Completed, 0, total) * 100D / total, MidpointRounding.AwayFromZero):0}%"
+            : string.Empty;
+        if (progress.Stage == SourceUpdateProgressStage.Installing)
+        {
+            return useEnglish ? $"Replacing source{percentText}" : $"正在替换源码{percentText}";
+        }
+
+        var speed = FormatTransferSpeed(progress.BytesPerSecond);
+        return useEnglish
+            ? $"Downloading update{percentText} · {speed}"
+            : $"正在下载更新{percentText} · {speed}";
     }
 
     private static string UpdateStatePath(GitHubUpdateSource source) => GitHubUpdateService.UpdateStatePath(source);
@@ -1979,6 +2389,8 @@ internal sealed class LauncherForm : Form
                 progress?.Report(new SourceUpdateProgress(SourceUpdateProgressStage.Downloading, 0, totalBytes));
                 var buffer = new byte[128 * 1024];
                 long downloadedBytes = 0;
+                var lastReportedBytes = 0L;
+                var transferRate = new TransferRateTracker();
                 while (true)
                 {
                     var read = await input.ReadAsync(buffer);
@@ -1988,7 +2400,17 @@ internal sealed class LauncherForm : Form
                     }
                     await output.WriteAsync(buffer.AsMemory(0, read));
                     downloadedBytes += read;
-                    progress?.Report(new SourceUpdateProgress(SourceUpdateProgressStage.Downloading, downloadedBytes, totalBytes));
+                    if (downloadedBytes - lastReportedBytes >= 256 * 1024 || totalBytes == downloadedBytes)
+                    {
+                        var bytesPerSecond = transferRate.Sample(downloadedBytes);
+                        progress?.Report(new SourceUpdateProgress(SourceUpdateProgressStage.Downloading, downloadedBytes, totalBytes, bytesPerSecond));
+                        lastReportedBytes = downloadedBytes;
+                    }
+                }
+                if (downloadedBytes != lastReportedBytes)
+                {
+                    var bytesPerSecond = transferRate.Sample(downloadedBytes);
+                    progress?.Report(new SourceUpdateProgress(SourceUpdateProgressStage.Downloading, downloadedBytes, totalBytes, bytesPerSecond));
                 }
             }
 
@@ -3608,7 +4030,7 @@ internal sealed class LauncherForm : Form
         _phaseLabel.Text = L(_phaseChinese, _phaseEnglish);
         header.Controls.Add(_phaseLabel);
 
-        _launcherUpdateProgress.Bounds = new Rectangle(380, 63, 240, 7);
+        _launcherUpdateProgress.Bounds = new Rectangle(380, 62, 240, 9);
         _launcherUpdateProgress.Minimum = 0;
         _launcherUpdateProgress.Maximum = 100;
         _launcherUpdateProgress.Style = ProgressBarStyle.Continuous;
@@ -3951,7 +4373,17 @@ internal sealed class LauncherForm : Form
         detailPanel.Controls.Add(_detailUpdateButton);
         detailPanel.Controls.Add(stopButton);
         detailPanel.Controls.Add(_detailUninstallButton);
-        _detailUpdateProgress = new ProgressBar { Location = new Point(30, 520), Size = new Size(490, 8), Minimum = 0, Maximum = 100, Visible = false };
+        _detailUpdateProgress = new GlassProgressBar
+        {
+            Location = new Point(30, 520),
+            Size = new Size(490, 9),
+            Minimum = 0,
+            Maximum = 100,
+            TrackColor = Color.FromArgb(220, 234, 230),
+            FillColor = Color.FromArgb(38, 151, 126),
+            BorderColor = Color.FromArgb(155, 197, 187),
+            Visible = false
+        };
         detailPanel.Controls.Add(_detailUpdateProgress);
         _detailActionHint = CreateParagraph(L("模型启动后，主按钮会自动切换为打开 WebUI。", "The primary action changes to Open WebUI when the service is ready."), new Rectangle(30, 520, 500, 45), 8.5F, Theme.Muted, FontStyle.Regular);
         detailPanel.Controls.Add(_detailActionHint);
@@ -4272,7 +4704,12 @@ internal sealed class LauncherForm : Form
         }
         if (_detailUpdateProgress is not null)
         {
-            _detailUpdateProgress.Visible = selectedState == ServiceRuntimeState.Updating;
+            _detailUpdateProgress.Visible = selectedState == ServiceRuntimeState.Updating &&
+                _pluginUpdateInProgress && selected.Id.Equals(_updatingPluginId, StringComparison.OrdinalIgnoreCase);
+            if (_detailUpdateProgress.Visible && _latestPluginUpdateProgress is not null)
+            {
+                UpdateSelectedPluginProgress(_latestPluginUpdateProgress);
+            }
         }
     }
 

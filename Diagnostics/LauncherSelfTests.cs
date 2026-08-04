@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Drawing.Drawing2D;
 using System.IO.Compression;
 using System.Security.Cryptography;
 using System.Text;
@@ -300,6 +301,17 @@ internal static class LauncherSelfTests
             Assert(updateProgress.Any(progress => progress.Stage == LauncherUpdateProgressStage.Verifying && progress.CompletedBytes == verifiedUpdateBytes.Length), "Launcher update verification progress completion", lines);
             Assert(LauncherForm.FormatTransferSpeed(12.5D * 1024D * 1024D) == "12.5 MB/s", "Launcher update download speed presentation", lines);
             Assert(LauncherForm.FormatTransferSpeed(640D * 1024D) == "640.0 KB/s", "Launcher update low-speed presentation", lines);
+            var sampledAt = TimeSpan.Zero;
+            var transferRateTracker = new TransferRateTracker(() => sampledAt);
+            sampledAt = TimeSpan.FromSeconds(2);
+            var firstRate = transferRateTracker.Sample(2L * 1024L * 1024L);
+            sampledAt = TimeSpan.FromSeconds(3);
+            var secondRate = transferRateTracker.Sample(3L * 1024L * 1024L);
+            Assert(firstRate == 1024D * 1024D && secondRate == 1024D * 1024D, "Shared transfer rate sampling", lines);
+            var pluginDownloadProgress = new SourceUpdateProgress(SourceUpdateProgressStage.Downloading, 50, 100, 12.5D * 1024D * 1024D);
+            Assert(LauncherForm.FormatPluginUpdateStatus(pluginDownloadProgress, false) == "正在下载更新 50% · 12.5 MB/s", "Plugin update Chinese speed presentation", lines);
+            Assert(LauncherForm.FormatPluginUpdateStatus(pluginDownloadProgress, true) == "Downloading update 50% · 12.5 MB/s", "Plugin update English speed presentation", lines);
+            Assert(!LauncherForm.FormatPluginUpdateStatus(new SourceUpdateProgress(SourceUpdateProgressStage.Installing, 50, 100), false).Contains("/s", StringComparison.Ordinal), "Plugin install phase hides transfer speed", lines);
 
             Assert(PluginManifestSignatureVerifier.Verify(manifest, publishers).IsTrusted, "Signed manifest verification", lines);
             Assert(manifest.SchemaVersion == 5 && manifest.RequiresLicenseAcceptance, "Plugin license metadata", lines);
@@ -845,6 +857,15 @@ internal static class LauncherSelfTests
         using var progressFont = new Font("Microsoft YaHei UI", 9.5F, FontStyle.Bold);
         var fullStatusWidth = LauncherForm.CalculateLauncherUpdateProgressWidth("正在下载并校验启动器（下载 50% · 12.5 MB/s）", progressFont, 330);
         Assert(fullStatusWidth > 180 && fullStatusWidth <= 330, "Launcher update progress indicator follows full status text width", lines);
+        using var reflectionBitmap = new Bitmap(180, 42);
+        using (var reflectionGraphics = Graphics.FromImage(reflectionBitmap))
+        using (var reflectionPath = new GraphicsPath())
+        {
+            reflectionGraphics.Clear(Theme.DeepTeal);
+            reflectionPath.AddRectangle(new Rectangle(0, 0, reflectionBitmap.Width, reflectionBitmap.Height));
+            GlassPaint.DrawReflection(reflectionGraphics, reflectionPath, new Rectangle(0, 0, reflectionBitmap.Width, reflectionBitmap.Height), 72, 0.5F, 90);
+        }
+        Assert(reflectionBitmap.GetPixel(20, 4).ToArgb() != reflectionBitmap.GetPixel(20, 36).ToArgb(), "Glass reflection layer renders a visible top highlight", lines);
     }
 
     private static ServiceProfile ToServiceProfileForSelfTest(this LauncherModelDefinition definition)
