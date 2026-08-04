@@ -1,13 +1,13 @@
 {
-  "Version": "0.16.30",
+  "Version": "0.16.31",
   "MinimumCompatibleVersion": "0.11.0",
-  "DownloadUrl": "https://github.com/Bachen-beep/bachen-ai-launcher/releases/download/v0.16.30/BaChen.AI.Launcher.exe",
-  "Sha256": "A2483094F22CBD82138EBA7695D16E697E27625B5B6C355F9C8140BB1F0B8EF3",
-  "ReleaseNotesUrl": "https://github.com/Bachen-beep/bachen-ai-launcher/releases/tag/v0.16.30",
-  "PublishedAt": "2026-08-04T03:57:58.630046+00:00",
+  "DownloadUrl": "https://github.com/Bachen-beep/bachen-ai-launcher/releases/download/v0.16.31/BaChen.AI.Launcher.exe",
+  "Sha256": "F696B5BF9A9F676A194D12335FD9BB74B52513F416C4BC820A0FDCA476E60AB6",
+  "ReleaseNotesUrl": "https://github.com/Bachen-beep/bachen-ai-launcher/releases/tag/v0.16.31",
+  "PublishedAt": "2026-08-04T04:34:25.924333+00:00",
   "Signature": {
     "KeyId": "bachen-launcher-release-2026",
     "Algorithm": "RSA-SHA256",
-    "Value": "G2KnuexRqIp\u002BAa5DPBU5sB3In8N25AGZiIwVICi7d7iwCx7lH\u002BxRp80iX0/YZkINwAa78MB6U3BM9SIbNwYfKuYkV0h3jiNrULNe4zzSVcqUEiBCA4KFSnshBrYK9VYPv1s6wJfBF4X2AKUsutPF\u002BtNuf9ORzIzkbyYak/vUEmZp2lXEziyNonIFkjSfLHLsVYYMFKqlKiB8fA\u002BP0WkfiP0Q7ef4EZY\u002B37/9hUVnwvc\u002BpHGmwhAVeV/YJsLp2KkOmG6fNthVijxptEDoVKG336QPvBV4OvPc1ZorwlgS3SIlMoPRytudCTf43cN5BjMBZeBVA1OjY6c2kdy2yKXsEsPRLjVqZPOG2ZCLgkqe4ufcyq4Cz6q2yAiNzHpYeMXMf3AOSe3yl15ghGBcUwl3a191ot4OjxjpGTnV815kE2fgJFtDP9k1f3iNNiacdEtkAMktsjI509Pe/9XtAXFEmkRStCOEPw\u002BR61ZK50zaTjJz3/RRmbcrV8XS3wErnFU4"
+    "Value": "HRM77AoibMh4duIA1b9Qj6cJ5At9oy9TyKkP68uSNl7UT0fcGwEbtRtLfOXk91nuTND2uD29fanf\u002BaI37TxU7pBsVXjA88dPOq80fZNqsUdbi1t6KZxZdB/lwYSFxz/YGf7YASka/npF7JIdmuwALEvdxDhPKrlWQuvf0nA\u002B9XHUkzgcF5bfne7aanhnH/m8Lri5yYd/RSpmZ80NYkNJvftzsRZlpcYnBRqoVTyfwzAVkFLrRxPMEvlZ/Ythrwr/65G5TYWmP9OLrv2HWYrIzoUhjopalarn6PMeQTltrNP\u002BzPFCgDgjRj/hD8twUPd79MHiuVYBlYqWKX1cr4CDdOSfyGGCLtw4IIIcBVPp3COkSqooGMLeudRAOwa2XyGDhXXZrIZRutjAYaASvGrG\u002BWun23m6O\u002BKmU0N5cmhYEICeYFaD6OQr6WUBFQvj7q6Uxr1pPgdaGZzAmqiQJnBa/EBSsRzrCgwarwOLn/anFZCOiCAH4E\u002BYDtMXnE32tAou"
   }
 }
