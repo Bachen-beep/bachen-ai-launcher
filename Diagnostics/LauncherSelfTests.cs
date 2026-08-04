@@ -480,11 +480,6 @@ internal static class LauncherSelfTests
             var parsedGpus = SystemResourceProbe.ParseGpuOutput("0, NVIDIA GeForce RTX 4060, 512, 8188\r\n1, NVIDIA GeForce RTX 4090, 1024, 24564\r\n");
             Assert(parsedGpus.Count == 2 && parsedGpus.OrderByDescending(gpu => gpu.TotalMiB).First().Name == "NVIDIA GeForce RTX 4090", "Actual multi-GPU model parsing and primary selection", lines);
             Assert(SystemResourceProbe.FormatGpuUsageGiB(1024, 8188) == "1.00 / 8.00 GiB", "GPU MiB to GiB display formatting", lines);
-            var downwardLogBounds = LauncherForm.CalculateDownwardLogBounds(new Rectangle(100, 100, 1200, 800), 210, 72, new Rectangle(0, 0, 1920, 1080));
-            Assert(downwardLogBounds.Top == 100 && downwardLogBounds.Height == 938, "Runtime log expands the window downward", lines);
-            var edgeAdjustedLogBounds = LauncherForm.CalculateDownwardLogBounds(new Rectangle(100, 200, 1200, 800), 210, 72, new Rectangle(0, 0, 1920, 1080));
-            Assert(edgeAdjustedLogBounds.Top == 142 && edgeAdjustedLogBounds.Bottom == 1080, "Downward runtime log remains inside the working area", lines);
-
             var gitHubSourceRoot = Path.Combine(testRoot, "github-source");
             Directory.CreateDirectory(gitHubSourceRoot);
             await File.WriteAllTextAsync(Path.Combine(gitHubSourceRoot, "app.py"), "print('ready')", Encoding.UTF8);
@@ -863,9 +858,6 @@ internal static class LauncherSelfTests
         Assert(LauncherForm.CalculateEqualActionWidths(280, 4, 10).All(width => width >= 62), "Plugin action buttons retain usable minimum-window widths", lines);
         var localizedEntry = new LauncherLogEntry(DateTime.Now, "中文日志", "English log", null, false);
         Assert(localizedEntry.DisplayMessage(false) == "中文日志" && localizedEntry.DisplayMessage(true) == "English log", "Runtime logs re-render in the selected language", lines);
-        using var progressFont = new Font("Microsoft YaHei UI", 9.5F, FontStyle.Bold);
-        var fullStatusWidth = LauncherForm.CalculateLauncherUpdateProgressWidth("正在下载并校验启动器（下载 50% · 12.5 MB/s）", progressFont, 330);
-        Assert(fullStatusWidth > 180 && fullStatusWidth <= 330, "Launcher update progress indicator follows full status text width", lines);
         using var reflectionBitmap = new Bitmap(180, 42);
         using (var reflectionGraphics = Graphics.FromImage(reflectionBitmap))
         using (var reflectionPath = new GraphicsPath())

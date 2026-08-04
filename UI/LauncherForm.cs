@@ -1191,21 +1191,12 @@ internal sealed class LauncherForm : Form
 
     private readonly SafeTextLabel _statusLabel = new();
     private readonly SafeTextLabel _phaseLabel = new();
-    private readonly GlassProgressBar _launcherUpdateProgress = new()
-    {
-        TrackColor = Color.FromArgb(31, 99, 94),
-        FillColor = Color.FromArgb(105, 220, 181),
-        BorderColor = Color.FromArgb(87, 166, 151)
-    };
-    private bool _launcherUpdateInProgress;
-    private LauncherUpdateProgress? _latestLauncherUpdateProgress;
     private readonly RichTextBox _log = new();
     private readonly List<LauncherLogEntry> _logEntries = [];
     private readonly Dictionary<string, ServiceRuntimeState> _runtimeStates = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, SourceUpdateCheck> _availableSourceUpdates = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, PluginListItem> _pluginItems = new(StringComparer.OrdinalIgnoreCase);
     private readonly System.Windows.Forms.Timer _gpuRefreshTimer = new() { Interval = 5000 };
-    private readonly System.Windows.Forms.Timer _logAnimationTimer = new() { Interval = 15 };
     private readonly ToolTip _toolTip = new();
     private RoundedButton _openButton = new();
     private RoundedButton? _detailPrimaryButton;
@@ -1218,7 +1209,6 @@ internal sealed class LauncherForm : Form
     private string? _updatingPluginId;
     private SourceUpdateProgress? _latestPluginUpdateProgress;
     private ParagraphLabel? _detailActionHint;
-    private RoundedButton? _logToggleButton;
     private SafeTextLabel? _gpuSummaryLabel;
     private SafeTextLabel? _gpuNameLabel;
     private SafeTextLabel? _detailTitleLabel;
@@ -1241,11 +1231,8 @@ internal sealed class LauncherForm : Form
     private GpuMeter? _gpuMeter;
     private List<PluginUiEntry> _pluginEntries = [];
     private string _selectedPluginId = "woosh-dflow";
-    private bool _logExpanded;
     private bool _logAutoFollow = true;
     private int _unseenLogEntryCount;
-    private Rectangle? _logCollapsedWindowBounds;
-    private bool _logExpandsWindowDownward;
     private ServiceProfile? _activeService;
     private Process? _activeProcess;
     private bool _useEnglish;
@@ -1287,7 +1274,6 @@ internal sealed class LauncherForm : Form
         InitializeUi();
         RefreshStatus();
         _gpuRefreshTimer.Tick += (_, _) => UpdateGpuIndicator();
-        _logAnimationTimer.Tick += (_, _) => AnimateLogDrawer();
         Shown += async (_, _) =>
         {
             _gpuRefreshTimer.Start();
@@ -1301,7 +1287,6 @@ internal sealed class LauncherForm : Form
         FormClosed += (_, _) =>
         {
             _gpuRefreshTimer.Dispose();
-            _logAnimationTimer.Dispose();
         };
         FormClosing += HandleLauncherFormClosing;
     }
@@ -1435,7 +1420,6 @@ internal sealed class LauncherForm : Form
         if (!IsDisposed)
         {
             _phaseLabel.Text = L(_phaseChinese, _phaseEnglish);
-            UpdateLauncherUpdateProgressWidth();
             _phaseLabel.Invalidate();
         }
     }
@@ -1977,7 +1961,6 @@ internal sealed class LauncherForm : Form
         try
         {
             ShowLauncherUpdateProgress();
-            SetRuntimePhase("正在下载并校验启动器", "Downloading and verifying launcher");
             var progress = new Progress<LauncherUpdateProgress>(UpdateLauncherUpdateProgress);
             var packagePath = await _launcherUpdateService.DownloadVerifiedAsync(check.Manifest, progress);
             UpdateLauncherUpdateProgress(new LauncherUpdateProgress(LauncherUpdateProgressStage.Verifying, 1, 1));
@@ -1987,33 +1970,21 @@ internal sealed class LauncherForm : Form
         }
         catch
         {
-            _launcherUpdateInProgress = false;
-            _latestLauncherUpdateProgress = null;
-            _launcherUpdateProgress.Visible = false;
             throw;
         }
     }
 
     private void ShowLauncherUpdateProgress()
     {
-        _launcherUpdateInProgress = true;
-        _latestLauncherUpdateProgress = null;
-        _launcherUpdateProgress.Value = 0;
-        _launcherUpdateProgress.Style = ProgressBarStyle.Marquee;
-        _launcherUpdateProgress.MarqueeAnimationSpeed = 28;
-        _launcherUpdateProgress.Visible = true;
         _maintenanceCenter?.ReportProgress(null, L("正在准备启动器更新", "Preparing launcher update"));
     }
 
     private void UpdateLauncherUpdateProgress(LauncherUpdateProgress progress)
     {
-        _launcherUpdateInProgress = true;
-        _latestLauncherUpdateProgress = progress;
-        _launcherUpdateProgress.Visible = true;
         var totalBytes = progress.TotalBytes.GetValueOrDefault();
         if (totalBytes <= 0)
         {
-            _launcherUpdateProgress.Style = ProgressBarStyle.Marquee;
+            _maintenanceCenter?.ReportProgress(null, L("正在准备启动器更新", "Preparing launcher update"));
             return;
         }
 
@@ -2022,27 +1993,12 @@ internal sealed class LauncherForm : Form
         var progressValue = progress.Stage == LauncherUpdateProgressStage.Downloading
             ? Math.Min(85, (int)Math.Round(sourcePercent * 0.85D, MidpointRounding.AwayFromZero))
             : 85 + (int)Math.Round(sourcePercent * 0.15D, MidpointRounding.AwayFromZero);
-        _launcherUpdateProgress.Style = ProgressBarStyle.Continuous;
-        _launcherUpdateProgress.Value = Math.Clamp(progressValue, 0, 100);
         var speed = FormatTransferSpeed(progress.BytesPerSecond);
-        _phaseLabel.Text = progress.Stage == LauncherUpdateProgressStage.Downloading
-            ? L($"正在下载并校验启动器（下载 {sourcePercent}% · {speed}）", $"Downloading and verifying launcher ({sourcePercent}% downloaded · {speed})")
-            : L($"正在下载并校验启动器（校验 {sourcePercent}%）", $"Downloading and verifying launcher ({sourcePercent}% verified)");
         _maintenanceCenter?.ReportProgress(
             Math.Clamp(progressValue, 0, 100),
             progress.Stage == LauncherUpdateProgressStage.Downloading
                 ? L($"正在下载启动器 {sourcePercent}% · {speed}", $"Downloading launcher {sourcePercent}% · {speed}")
                 : L($"正在校验启动器 {sourcePercent}%", $"Verifying launcher {sourcePercent}%"));
-        UpdateLauncherUpdateProgressWidth();
-    }
-
-    private void RestoreLauncherUpdateProgressUi()
-    {
-        _launcherUpdateProgress.Visible = _launcherUpdateInProgress;
-        if (_launcherUpdateInProgress && _latestLauncherUpdateProgress is not null)
-        {
-            UpdateLauncherUpdateProgress(_latestLauncherUpdateProgress);
-        }
     }
 
     internal static string FormatTransferSpeed(double? bytesPerSecond)
@@ -2064,19 +2020,6 @@ internal sealed class LauncherForm : Form
 
         return $"{bytesPerSecond.Value:0} B/s";
     }
-
-    private void UpdateLauncherUpdateProgressWidth()
-    {
-        if (_phaseLabel.Width <= 0 || string.IsNullOrWhiteSpace(_phaseLabel.Text))
-        {
-            return;
-        }
-
-        _launcherUpdateProgress.Width = CalculateLauncherUpdateProgressWidth(_phaseLabel.Text, _phaseLabel.Font, _phaseLabel.Width);
-    }
-
-    internal static int CalculateLauncherUpdateProgressWidth(string statusText, Font font, int availableWidth)
-        => Math.Min(TextRenderer.MeasureText(statusText, font).Width, Math.Max(1, availableWidth));
 
     private async Task<LauncherUpdateCheck> CheckLauncherVersionFromAllSourcesAsync()
     {
@@ -4226,13 +4169,6 @@ internal sealed class LauncherForm : Form
         _phaseLabel.Text = L(_phaseChinese, _phaseEnglish);
         header.Controls.Add(_phaseLabel);
 
-        _launcherUpdateProgress.Bounds = new Rectangle(380, 62, 240, 9);
-        _launcherUpdateProgress.Minimum = 0;
-        _launcherUpdateProgress.Maximum = 100;
-        _launcherUpdateProgress.Style = ProgressBarStyle.Continuous;
-        _launcherUpdateProgress.Visible = _launcherUpdateInProgress;
-        header.Controls.Add(_launcherUpdateProgress);
-
         var gpuPanel = new Panel { Size = new Size(400, 54), BackColor = Theme.DeepTeal };
         _gpuNameLabel = CreateText(L("正在检测 GPU", "Detecting GPU"), new Rectangle(0, 2, 226, 21), 8F, Color.FromArgb(166, 221, 210), FontStyle.Bold);
         gpuPanel.Controls.Add(_gpuNameLabel);
@@ -4260,15 +4196,13 @@ internal sealed class LauncherForm : Form
             gpuPanel.Left = toolsButton.Left - gpuPanel.Width - 24;
             gpuPanel.Top = 15;
             _phaseLabel.Width = Math.Max(230, gpuPanel.Left - _phaseLabel.Left - 24);
-            _launcherUpdateProgress.Left = _phaseLabel.Left;
-            UpdateLauncherUpdateProgressWidth();
         }
         header.SizeChanged += (_, _) => LayoutHeader();
 
         _logHost = new Panel
         {
             Dock = DockStyle.Bottom,
-            Height = _logExpanded ? 210 : 72,
+            Height = 210,
             BackColor = BackColor,
             Padding = new Padding(12, 4, 12, 8)
         };
@@ -4287,11 +4221,6 @@ internal sealed class LauncherForm : Form
         _logFollowStateLabel = CreateText(L("正在跟随最新输出", "Following live output"), new Rectangle(20, 48, 200, 24), 8F, Color.FromArgb(134, 200, 187), FontStyle.Bold);
         logCard.Controls.Add(_logFollowStateLabel);
 
-        _logToggleButton = CreateActionButton(_logExpanded ? L("收起", "Collapse") : L("展开", "Expand"), Color.FromArgb(43, 110, 102), 88);
-        _logToggleButton.Height = 30;
-        _logToggleButton.Click += (_, _) => ToggleLogDrawer();
-        logCard.Controls.Add(_logToggleButton);
-
         var allLogsButton = CreateActionButton(L("全部", "All"), Color.FromArgb(35, 104, 98), 68);
         var errorLogsButton = CreateActionButton(L("错误", "Errors"), Theme.Coral, 76);
         var currentLogsButton = CreateActionButton(L("当前", "Current"), Color.FromArgb(47, 83, 132), 76);
@@ -4304,7 +4233,7 @@ internal sealed class LauncherForm : Form
         {
             button.Height = 28;
             button.Font = new Font("Microsoft YaHei UI", 8F, FontStyle.Bold);
-            button.Visible = _logExpanded;
+            button.Visible = true;
             logCard.Controls.Add(button);
         }
         allLogsButton.Click += (_, _) => SetLogFilter(LauncherLogFilter.All);
@@ -4348,14 +4277,12 @@ internal sealed class LauncherForm : Form
         };
         _log.VScroll += (_, _) => BeginInvoke(new Action(UpdateLogFollowState));
         _log.MouseWheel += (_, _) => BeginInvoke(new Action(UpdateLogFollowState));
-        _log.Visible = _logExpanded;
+        _log.Visible = true;
         logCard.Controls.Add(_log);
 
         void LayoutLogCard()
         {
-            _logToggleButton.Left = logCard.ClientSize.Width - _logToggleButton.Width - 18;
-            _logToggleButton.Top = 8;
-            _logSummaryLabel.Width = Math.Max(180, _logToggleButton.Left - _logSummaryLabel.Left - 14);
+            _logSummaryLabel.Width = Math.Max(180, logCard.ClientSize.Width - _logSummaryLabel.Left - 20);
             var x = _logFollowStateLabel.Right + 12;
             foreach (var button in logButtons)
             {
@@ -4653,7 +4580,6 @@ internal sealed class LauncherForm : Form
         }
         RenderLog();
         UpdateGpuIndicator();
-        RestoreLauncherUpdateProgressUi();
     }
 
     private List<PluginUiEntry> BuildPluginEntries()
@@ -5022,111 +4948,6 @@ internal sealed class LauncherForm : Form
             $"NVIDIA 专用显存（nvidia-smi 原始值）：{gpu.UsedMiB:N0} / {gpu.TotalMiB:N0} MiB",
             $"Dedicated NVIDIA VRAM (raw nvidia-smi values): {gpu.UsedMiB:N0} / {gpu.TotalMiB:N0} MiB"));
         _gpuMeter.SetValue(gpu.UsedMiB, gpu.TotalMiB);
-    }
-
-    private void ToggleLogDrawer()
-    {
-        if (_logAnimationTimer.Enabled)
-        {
-            return;
-        }
-        if (!_logExpanded)
-        {
-            _logExpandsWindowDownward = WindowState == FormWindowState.Normal;
-            _logCollapsedWindowBounds = _logExpandsWindowDownward ? Bounds : null;
-        }
-        _logExpanded = !_logExpanded;
-        if (_logToggleButton is not null)
-        {
-            _logToggleButton.Text = _logExpanded ? L("收起", "Collapse") : L("展开", "Expand");
-            _logToggleButton.Enabled = false;
-            _logToggleButton.Invalidate();
-        }
-        if (_logExpanded)
-        {
-            SetLogDrawerContentVisible(true);
-            ApplyDownwardLogWindowBounds(210, 72);
-        }
-        _logAnimationTimer.Start();
-    }
-
-    private void AnimateLogDrawer()
-    {
-        if (_logHost is null)
-        {
-            _logAnimationTimer.Stop();
-            return;
-        }
-        const int collapsedHeight = 72;
-        const int expandedHeight = 210;
-        var target = _logExpanded ? expandedHeight : collapsedHeight;
-        var difference = target - _logHost.Height;
-        if (Math.Abs(difference) <= 8)
-        {
-            _logHost.Height = target;
-            if (!_logExpanded)
-            {
-                SetLogDrawerContentVisible(false);
-                RestoreCollapsedLogWindowBounds();
-                _logCollapsedWindowBounds = null;
-                _logExpandsWindowDownward = false;
-            }
-            if (_logToggleButton is not null)
-            {
-                _logToggleButton.Enabled = true;
-            }
-            _logAnimationTimer.Stop();
-            return;
-        }
-        var nextHeight = _logHost.Height + Math.Sign(difference) * Math.Max(8, Math.Abs(difference) / 4);
-        _logHost.Height = Math.Clamp(nextHeight, Math.Min(_logHost.Height, target), Math.Max(_logHost.Height, target));
-    }
-
-    private void SetLogDrawerContentVisible(bool visible)
-    {
-        _log.Visible = visible;
-        if (_log.Parent is null)
-        {
-            return;
-        }
-        foreach (Control control in _log.Parent.Controls)
-        {
-            if (control is RoundedButton button && !ReferenceEquals(button, _logToggleButton))
-            {
-                button.Visible = visible;
-            }
-        }
-    }
-
-    private void RestoreCollapsedLogWindowBounds()
-    {
-        if (_logExpandsWindowDownward && _logCollapsedWindowBounds is { } collapsedBounds && WindowState == FormWindowState.Normal)
-        {
-            Bounds = collapsedBounds;
-        }
-    }
-
-    private void ApplyDownwardLogWindowBounds(int logHeight, int collapsedLogHeight)
-    {
-        if (!_logExpandsWindowDownward || _logCollapsedWindowBounds is not { } collapsedBounds || WindowState != FormWindowState.Normal)
-        {
-            return;
-        }
-        Bounds = CalculateDownwardLogBounds(collapsedBounds, logHeight, collapsedLogHeight, Screen.FromRectangle(collapsedBounds).WorkingArea);
-    }
-
-    internal static Rectangle CalculateDownwardLogBounds(Rectangle collapsedBounds, int logHeight, int collapsedLogHeight, Rectangle workingArea)
-    {
-        var extraHeight = Math.Max(0, logHeight - collapsedLogHeight);
-        var height = Math.Min(workingArea.Height, collapsedBounds.Height + extraHeight);
-        var top = collapsedBounds.Top;
-        var overflow = top + height - workingArea.Bottom;
-        if (overflow > 0)
-        {
-            top -= overflow;
-        }
-        top = Math.Max(workingArea.Top, top);
-        return new Rectangle(collapsedBounds.Left, top, collapsedBounds.Width, height);
     }
 
     private void InitializeLegacyUi()
