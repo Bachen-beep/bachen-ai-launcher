@@ -1,13 +1,13 @@
 {
-  "Version": "0.16.35",
+  "Version": "0.16.36",
   "MinimumCompatibleVersion": "0.11.0",
-  "DownloadUrl": "https://github.com/Bachen-beep/bachen-ai-launcher/releases/download/v0.16.35/BaChen.AI.Launcher.exe",
-  "Sha256": "31161AB21357C3371683461D5EF8B7E3F47F49FED20E4EC3123B6EDA66B016E5",
-  "ReleaseNotesUrl": "https://github.com/Bachen-beep/bachen-ai-launcher/releases/tag/v0.16.35",
-  "PublishedAt": "2026-08-04T08:46:36.4743918+00:00",
+  "DownloadUrl": "https://github.com/Bachen-beep/bachen-ai-launcher/releases/download/v0.16.36/BaChen.AI.Launcher.exe",
+  "Sha256": "97EE8558694F6AA3B9B6A9034EF826CC9F3066E97361DA2EAAD6B4B8C34F90E2",
+  "ReleaseNotesUrl": "https://github.com/Bachen-beep/bachen-ai-launcher/releases/tag/v0.16.36",
+  "PublishedAt": "2026-08-04T09:23:27.7756061+00:00",
   "Signature": {
     "KeyId": "bachen-launcher-release-2026",
     "Algorithm": "RSA-SHA256",
-    "Value": "hWLgSx7DBLgXTbsVN5jsJf9CLsIAc\u002BVMkNjF0sNdIi1rbFVEX4KLSmx2Joqzura\u002BTKjwk\u002BPCqB0uoM7\u002BIle1uawGcF8vUsy9LSwo0JrAj/\u002BtYoiJfInvcMu8C1REHKKMedOkA2QayUBcbtb5vZBGbhuFJ/Id4kf/Ev/4kCzl8bNxM5UMFu87WBLJaWiSTCLOOSPS3LfWaRomjK5wxyxZKodjWFDtGsIzpjdkasb9lq1DZ4DUv94jkb\u002Brzfr8K/oRe48B3qsg4fAf9Q1FyS31g/IQ20sVGlIdYBrT3WjFokeoid59pGjATQR\u002Bh66oNiCEjm4YdtpZyc1a4mSK\u002BbcnBx852Y\u002B7vcI/2LUitjZ\u002Bp8NvA3q2dF66R5fQAwSd5/o9JtSmsDkSF42Es7MV6U23d1n\u002BPH4x7YO6Zs48ymVUfIxtq25oX8ntGqTfpVjtJ4c2ZpdlaLjqh9ixJZrUot5UHBL5nXMyYmb4OGgDVfi1TXI5hykJXy8EArR9s7hmthVb"
+    "Value": "4dLgqtRZ/YPJm5TOVhFVCxUyvJU8vvWDYf78sSm9IheF9ShReDu4SwFtpYWaNuqsNvQ2H7jUCwe5mLdoCa5QvNAfnVWB1d\u002Be0\u002BlR2nhFHwpyfrXFIkffkKXAidHJXCD7abf\u002B4\u002BFFzz\u002Bq\u002BIOxgjYTWqNmSFCJJIVKvhTD9ZMK/\u002BPhLijHiBAG6q\u002BveMd\u002B5Y5MdltYauiG3lEnm0jLczd3wczv43Cp6x\u002BieTfWEYGrNFin3P/KAGSKBE29OoUDg82ammxgtPUshkPjKVYQo8eN1kYqmqkOuBc2m3YsBw00cHHThB/7Yy3l0OrVLthGChAyOrqTl1dMf\u002Bd/7nIlxzqxY/ADlFBNPr3y4VvIjKaH9C9wHLA\u002BJ/JhCjsCDVKfv23YvOf/I5p9wunLvsd8cfseLRx7VEG32s/lCPMKJSqSAHbkzZb\u002BHIrHq9xX5izDEQUZ6UuJZOawci8RddMMkXdL5GXquNSRslY5wWuro5jHYqWR3SFpKtot9My3LgVYi0FK"
   }
 }
