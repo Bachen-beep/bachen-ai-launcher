@@ -1,13 +1,13 @@
 {
-  "Version": "0.16.36",
+  "Version": "0.16.37",
   "MinimumCompatibleVersion": "0.11.0",
-  "DownloadUrl": "https://github.com/Bachen-beep/bachen-ai-launcher/releases/download/v0.16.36/BaChen.AI.Launcher.exe",
-  "Sha256": "97EE8558694F6AA3B9B6A9034EF826CC9F3066E97361DA2EAAD6B4B8C34F90E2",
-  "ReleaseNotesUrl": "https://github.com/Bachen-beep/bachen-ai-launcher/releases/tag/v0.16.36",
-  "PublishedAt": "2026-08-04T09:23:27.7756061+00:00",
+  "DownloadUrl": "https://github.com/Bachen-beep/bachen-ai-launcher/releases/download/v0.16.37/BaChen.AI.Launcher.exe",
+  "Sha256": "508919AAE0FFC7DCBB9611F96B45309063A7E7DEE13AFC697C4A80E0022CDE78",
+  "ReleaseNotesUrl": "https://github.com/Bachen-beep/bachen-ai-launcher/releases/tag/v0.16.37",
+  "PublishedAt": "2026-08-04T10:02:26.5015898+00:00",
   "Signature": {
     "KeyId": "bachen-launcher-release-2026",
     "Algorithm": "RSA-SHA256",
-    "Value": "4dLgqtRZ/YPJm5TOVhFVCxUyvJU8vvWDYf78sSm9IheF9ShReDu4SwFtpYWaNuqsNvQ2H7jUCwe5mLdoCa5QvNAfnVWB1d\u002Be0\u002BlR2nhFHwpyfrXFIkffkKXAidHJXCD7abf\u002B4\u002BFFzz\u002Bq\u002BIOxgjYTWqNmSFCJJIVKvhTD9ZMK/\u002BPhLijHiBAG6q\u002BveMd\u002B5Y5MdltYauiG3lEnm0jLczd3wczv43Cp6x\u002BieTfWEYGrNFin3P/KAGSKBE29OoUDg82ammxgtPUshkPjKVYQo8eN1kYqmqkOuBc2m3YsBw00cHHThB/7Yy3l0OrVLthGChAyOrqTl1dMf\u002Bd/7nIlxzqxY/ADlFBNPr3y4VvIjKaH9C9wHLA\u002BJ/JhCjsCDVKfv23YvOf/I5p9wunLvsd8cfseLRx7VEG32s/lCPMKJSqSAHbkzZb\u002BHIrHq9xX5izDEQUZ6UuJZOawci8RddMMkXdL5GXquNSRslY5wWuro5jHYqWR3SFpKtot9My3LgVYi0FK"
+    "Value": "8RPQFIa35a/dz7PQ9RRZb4uhfRs6XMZ39p7a3a9bGSPQmsXRtx2OSI0r1KnURgPEbjqpAJ\u002BbNhXsZvkBvccEGC\u002BlWBa4fKb6wB9jDjDyqGLvTjemQLIoab51NqC29XKEjSvWNeAuhAso/SVQiWb9jA33k/VJUJ\u002B5cpESld6gLDeVrx4ZGnGpe/dlD\u002BWGGuZtKNHrKiuXVmh\u002BoDtACTKx5g8MzyVL31WBIIeAIxZlCfVbz7pUHthhNw9jnjk9YlqMxbDCzwz7WUEeKWsK\u002Brc4wEIz3UXhqW5Zc/atmXjOixFUQ86mybGRAFXXAvCIPYdbxmzQXqcCgFkHLtz/tpJaAEjwytPtZiDZRxAZgNsRHj766CZzqMclakYnDPkigrbj3Zd1nyqlsi83kAAKoBUkVWsyUHljoK7lf3y4oThWoYpoxtz8ONygRfWcmifKY8JuH5LyALyZGZNaH5HmHAS14PHQ2F4VW4xkUw2vd1b8LjQHLz\u002BS3bPS1rVJkTYkiAq4"
   }
 }
