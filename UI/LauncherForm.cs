@@ -1231,6 +1231,7 @@ internal sealed class LauncherForm : Form
     private ParagraphLabel? _detailDependencyLabel;
     private SafeTextLabel? _detailTrustLabel;
     private SafeTextLabel? _logSummaryLabel;
+    private SafeTextLabel? _logFollowStateLabel;
     private SafeTextLabel? _pluginCountLabel;
     private FlowLayoutPanel? _stableModePanel;
     private FlowLayoutPanel? _pluginList;
@@ -1241,6 +1242,8 @@ internal sealed class LauncherForm : Form
     private List<PluginUiEntry> _pluginEntries = [];
     private string _selectedPluginId = "woosh-dflow";
     private bool _logExpanded;
+    private bool _logAutoFollow = true;
+    private int _unseenLogEntryCount;
     private Rectangle? _logCollapsedWindowBounds;
     private bool _logExpandsWindowDownward;
     private ServiceProfile? _activeService;
@@ -1443,6 +1446,8 @@ internal sealed class LauncherForm : Form
         {
             return;
         }
+        var followLatest = _logAutoFollow;
+        var firstVisibleCharacter = followLatest ? 0 : _log.GetCharIndexFromPosition(new Point(1, 1));
         var entries = (_logFilter switch
         {
             LauncherLogFilter.Errors => _logEntries.Where(entry => entry.IsError),
@@ -1451,8 +1456,27 @@ internal sealed class LauncherForm : Form
             _ => _logEntries
         }).ToList();
         _log.Text = string.Concat(entries.Select(entry => $"[{entry.Timestamp:HH:mm:ss}] {entry.DisplayMessage(_useEnglish)}{Environment.NewLine}"));
-        _log.SelectionStart = _log.TextLength;
+        _log.SelectionStart = followLatest
+            ? _log.TextLength
+            : Math.Clamp(firstVisibleCharacter, 0, _log.TextLength);
         _log.ScrollToCaret();
+        _logAutoFollow = followLatest;
+        if (followLatest)
+        {
+            _unseenLogEntryCount = 0;
+        }
+        if (_logFollowStateLabel is not null)
+        {
+            var errorCount = _logEntries.Count(entry => entry.IsError);
+            _logFollowStateLabel.Text = _logAutoFollow
+                ? L("正在跟随最新输出", "Following live output")
+                : _unseenLogEntryCount > 0
+                    ? L($"有 {_unseenLogEntryCount} 条新日志", $"{_unseenLogEntryCount} new entries")
+                    : L("已暂停跟随", "Follow paused");
+            _logFollowStateLabel.ForeColor = errorCount > 0
+                ? Color.FromArgb(244, 158, 151)
+                : _logAutoFollow ? Color.FromArgb(134, 200, 187) : Color.FromArgb(245, 196, 121);
+        }
         if (_logSummaryLabel is not null)
         {
             var latest = entries.LastOrDefault();
@@ -1466,7 +1490,54 @@ internal sealed class LauncherForm : Form
     private void SetLogFilter(LauncherLogFilter filter)
     {
         _logFilter = filter;
+        _logAutoFollow = true;
+        _unseenLogEntryCount = 0;
         RenderLog();
+    }
+
+    private bool IsLogScrolledToBottom()
+    {
+        if (_log.TextLength == 0 || !_log.Visible)
+        {
+            return true;
+        }
+        var lastCharacter = _log.GetCharIndexFromPosition(new Point(1, Math.Max(1, _log.ClientSize.Height - 2)));
+        return lastCharacter >= _log.TextLength - 2;
+    }
+
+    private void UpdateLogFollowState()
+    {
+        if (IsDisposed || _log.IsDisposed)
+        {
+            return;
+        }
+        var wasFollowing = _logAutoFollow;
+        _logAutoFollow = IsLogScrolledToBottom();
+        if (_logAutoFollow == wasFollowing)
+        {
+            return;
+        }
+        if (_logAutoFollow)
+        {
+            _unseenLogEntryCount = 0;
+        }
+        RenderLog();
+    }
+
+    private void ToggleLogFollow()
+    {
+        _logAutoFollow = !_logAutoFollow;
+        if (_logAutoFollow)
+        {
+            _unseenLogEntryCount = 0;
+            RenderLog();
+            return;
+        }
+        if (_logFollowStateLabel is not null)
+        {
+            _logFollowStateLabel.Text = L("已暂停跟随", "Follow paused");
+            _logFollowStateLabel.ForeColor = Color.FromArgb(245, 196, 121);
+        }
     }
 
     private void ToggleLanguage()
@@ -4213,6 +4284,8 @@ internal sealed class LauncherForm : Form
         logCard.Controls.Add(CreateText(L("运行日志", "Runtime log"), new Rectangle(20, 8, 110, 31), 11F, Color.FromArgb(211, 239, 232), FontStyle.Bold));
         _logSummaryLabel = CreateText(L("暂无运行消息", "No runtime messages"), new Rectangle(142, 9, 700, 30), 8.5F, Color.FromArgb(166, 202, 195), FontStyle.Regular);
         logCard.Controls.Add(_logSummaryLabel);
+        _logFollowStateLabel = CreateText(L("正在跟随最新输出", "Following live output"), new Rectangle(20, 48, 200, 24), 8F, Color.FromArgb(134, 200, 187), FontStyle.Bold);
+        logCard.Controls.Add(_logFollowStateLabel);
 
         _logToggleButton = CreateActionButton(_logExpanded ? L("收起", "Collapse") : L("展开", "Expand"), Color.FromArgb(43, 110, 102), 88);
         _logToggleButton.Height = 30;
@@ -4224,7 +4297,9 @@ internal sealed class LauncherForm : Form
         var currentLogsButton = CreateActionButton(L("当前", "Current"), Color.FromArgb(47, 83, 132), 76);
         var copyLogsButton = CreateActionButton(L("复制", "Copy"), Color.FromArgb(31, 121, 108), 76);
         var clearLogsButton = CreateActionButton(L("清空", "Clear"), Color.FromArgb(96, 99, 108), 76);
-        var logButtons = new[] { allLogsButton, errorLogsButton, currentLogsButton, copyLogsButton, clearLogsButton };
+        var followLogsButton = CreateActionButton(L("暂停跟随", "Pause follow"), Color.FromArgb(44, 103, 96), 88);
+        var diagnosticsButton = CreateActionButton(L("诊断", "Diagnose"), Color.FromArgb(170, 102, 49), 72);
+        var logButtons = new[] { allLogsButton, errorLogsButton, currentLogsButton, followLogsButton, copyLogsButton, diagnosticsButton, clearLogsButton };
         foreach (var button in logButtons)
         {
             button.Height = 28;
@@ -4235,6 +4310,12 @@ internal sealed class LauncherForm : Form
         allLogsButton.Click += (_, _) => SetLogFilter(LauncherLogFilter.All);
         errorLogsButton.Click += (_, _) => SetLogFilter(LauncherLogFilter.Errors);
         currentLogsButton.Click += (_, _) => SetLogFilter(LauncherLogFilter.CurrentService);
+        followLogsButton.Click += (_, _) =>
+        {
+            ToggleLogFollow();
+            followLogsButton.Text = _logAutoFollow ? L("暂停跟随", "Pause follow") : L("跟随最新", "Follow live");
+        };
+        diagnosticsButton.Click += (_, _) => ShowEnvironmentReport();
         copyLogsButton.Click += (_, _) =>
         {
             if (!string.IsNullOrWhiteSpace(_log.Text))
@@ -4247,6 +4328,7 @@ internal sealed class LauncherForm : Form
         {
             _logEntries.Clear();
             _logFilter = LauncherLogFilter.All;
+            _unseenLogEntryCount = 0;
             RenderLog();
         };
 
@@ -4256,6 +4338,16 @@ internal sealed class LauncherForm : Form
         _log.BackColor = logCard.FillColor;
         _log.ForeColor = Color.FromArgb(216, 236, 230);
         _log.Font = new Font("Cascadia Mono", 9F);
+        _log.DetectUrls = true;
+        _log.LinkClicked += (_, eventArgs) =>
+        {
+            if (!string.IsNullOrWhiteSpace(eventArgs.LinkText))
+            {
+                Process.Start(new ProcessStartInfo(eventArgs.LinkText) { UseShellExecute = true });
+            }
+        };
+        _log.VScroll += (_, _) => BeginInvoke(new Action(UpdateLogFollowState));
+        _log.MouseWheel += (_, _) => BeginInvoke(new Action(UpdateLogFollowState));
         _log.Visible = _logExpanded;
         logCard.Controls.Add(_log);
 
@@ -4264,7 +4356,7 @@ internal sealed class LauncherForm : Form
             _logToggleButton.Left = logCard.ClientSize.Width - _logToggleButton.Width - 18;
             _logToggleButton.Top = 8;
             _logSummaryLabel.Width = Math.Max(180, _logToggleButton.Left - _logSummaryLabel.Left - 14);
-            var x = 20;
+            var x = _logFollowStateLabel.Right + 12;
             foreach (var button in logButtons)
             {
                 button.Location = new Point(x, 49);
@@ -5939,6 +6031,10 @@ internal sealed class LauncherForm : Form
             || message.Contains("error", StringComparison.OrdinalIgnoreCase)
             || message.Contains("exception", StringComparison.OrdinalIgnoreCase);
         _logEntries.Add(new LauncherLogEntry(DateTime.Now, message, null, service?.Name ?? _activeService?.Name, error));
+        if (!_logAutoFollow)
+        {
+            _unseenLogEntryCount++;
+        }
         _diagnosticsService.Append(message, service?.Name ?? _activeService?.Name, error);
         RenderLog();
     }
@@ -5958,6 +6054,10 @@ internal sealed class LauncherForm : Form
             || english.Contains("error", StringComparison.OrdinalIgnoreCase)
             || english.Contains("exception", StringComparison.OrdinalIgnoreCase);
         _logEntries.Add(new LauncherLogEntry(DateTime.Now, chinese, english, service?.Name ?? _activeService?.Name, error));
+        if (!_logAutoFollow)
+        {
+            _unseenLogEntryCount++;
+        }
         _diagnosticsService.Append(chinese, service?.Name ?? _activeService?.Name, error);
         RenderLog();
     }
