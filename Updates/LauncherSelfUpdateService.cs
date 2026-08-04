@@ -62,6 +62,7 @@ internal sealed class LauncherSelfUpdateService
     private readonly HttpClient client;
     private readonly Func<string> publicKeyProvider;
     private readonly IReadOnlyList<LauncherUpdateSource> stableSources;
+    private const int MaxDownloadAttempts = 5;
 
     public LauncherSelfUpdateService(HttpClient client)
         : this(client, ReadEmbeddedPublicKey, null)
@@ -280,42 +281,11 @@ internal sealed class LauncherSelfUpdateService
         var updateRoot = updateRootOverride ?? Path.Combine(Path.GetTempPath(), "bachen-launcher-update-" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(updateRoot);
         var packagePath = Path.Combine(updateRoot, "BaChen AI Launcher.exe");
+        var partialPath = packagePath + ".partial";
         try
         {
-            using var response = await client.GetAsync(manifest.DownloadUrl, HttpCompletionOption.ResponseHeadersRead);
-            response.EnsureSuccessStatusCode();
-            var contentLength = response.Content.Headers.ContentLength;
-            var requiredBytes = contentLength ?? 150L * 1024 * 1024;
-            var drive = new DriveInfo(Path.GetPathRoot(updateRoot)!);
-            if (drive.AvailableFreeSpace < requiredBytes + 100L * 1024 * 1024)
-            {
-                throw new IOException($"Insufficient disk space. At least {(requiredBytes + 100L * 1024 * 1024) / 1024 / 1024} MiB must be available.");
-            }
-            progress?.Report(new LauncherUpdateProgress(LauncherUpdateProgressStage.Downloading, 0, contentLength));
-            await using (var input = await response.Content.ReadAsStreamAsync())
-            await using (var output = File.Create(packagePath))
-            {
-                var buffer = new byte[128 * 1024];
-                long downloadedBytes = 0;
-                var lastReportedBytes = 0L;
-                var transferRate = new TransferRateTracker();
-                while (true)
-                {
-                    var read = await input.ReadAsync(buffer);
-                    if (read == 0)
-                    {
-                        break;
-                    }
-                    await output.WriteAsync(buffer.AsMemory(0, read));
-                    downloadedBytes += read;
-                    if (downloadedBytes - lastReportedBytes >= 256 * 1024 || contentLength == downloadedBytes)
-                    {
-                        var bytesPerSecond = transferRate.Sample(downloadedBytes);
-                        progress?.Report(new LauncherUpdateProgress(LauncherUpdateProgressStage.Downloading, downloadedBytes, contentLength, bytesPerSecond));
-                        lastReportedBytes = downloadedBytes;
-                    }
-                }
-            }
+            var contentLength = await DownloadLauncherPackageWithRetryAsync(new Uri(manifest.DownloadUrl), partialPath, progress);
+            File.Move(partialPath, packagePath, true);
             await using var package = File.OpenRead(packagePath);
             var packageLength = package.Length;
             progress?.Report(new LauncherUpdateProgress(LauncherUpdateProgressStage.Verifying, 0, packageLength));
@@ -351,6 +321,108 @@ internal sealed class LauncherSelfUpdateService
             throw;
         }
     }
+
+    private async Task<long?> DownloadLauncherPackageWithRetryAsync(
+        Uri downloadUrl,
+        string partialPath,
+        IProgress<LauncherUpdateProgress>? progress)
+    {
+        Exception? lastError = null;
+        for (var attempt = 1; attempt <= MaxDownloadAttempts; attempt++)
+        {
+            try
+            {
+                var existingBytes = File.Exists(partialPath) ? new FileInfo(partialPath).Length : 0L;
+                using var request = CreateFreshRequest(downloadUrl);
+                if (existingBytes > 0)
+                {
+                    request.Headers.Range = new System.Net.Http.Headers.RangeHeaderValue(existingBytes, null);
+                }
+
+                using var response = await client.SendAsync(request, HttpCompletionOption.ResponseHeadersRead);
+                if (response.StatusCode == System.Net.HttpStatusCode.RequestedRangeNotSatisfiable)
+                {
+                    File.Delete(partialPath);
+                    throw new IOException("The partial launcher update is outside the remote file range.");
+                }
+                response.EnsureSuccessStatusCode();
+
+                var append = existingBytes > 0 && response.StatusCode == System.Net.HttpStatusCode.PartialContent;
+                if (!append && existingBytes > 0)
+                {
+                    existingBytes = 0;
+                    File.Delete(partialPath);
+                }
+
+                var remainingBytes = response.Content.Headers.ContentLength;
+                var totalBytes = response.Content.Headers.ContentRange?.Length ??
+                    (remainingBytes is null ? null : existingBytes + remainingBytes.Value);
+                var requiredBytes = totalBytes ?? 150L * 1024 * 1024;
+                var drive = new DriveInfo(Path.GetPathRoot(partialPath)!);
+                if (drive.AvailableFreeSpace < requiredBytes + 100L * 1024 * 1024)
+                {
+                    throw new IOException($"Insufficient disk space. At least {(requiredBytes + 100L * 1024 * 1024) / 1024 / 1024} MiB must be available.");
+                }
+
+                var downloadedBytes = existingBytes;
+                progress?.Report(new LauncherUpdateProgress(LauncherUpdateProgressStage.Downloading, downloadedBytes, totalBytes));
+                await using (var input = await response.Content.ReadAsStreamAsync())
+                await using (var output = new FileStream(
+                    partialPath,
+                    append ? FileMode.Append : FileMode.Create,
+                    FileAccess.Write,
+                    FileShare.None,
+                    128 * 1024,
+                    useAsync: true))
+                {
+                    var buffer = new byte[128 * 1024];
+                    var lastReportedBytes = downloadedBytes;
+                    var transferRate = new TransferRateTracker();
+                    while (true)
+                    {
+                        var read = await input.ReadAsync(buffer.AsMemory());
+                        if (read == 0)
+                        {
+                            break;
+                        }
+                        await output.WriteAsync(buffer.AsMemory(0, read));
+                        downloadedBytes += read;
+                        if (downloadedBytes - lastReportedBytes >= 256 * 1024 || totalBytes == downloadedBytes)
+                        {
+                            var bytesPerSecond = transferRate.Sample(downloadedBytes - existingBytes);
+                            progress?.Report(new LauncherUpdateProgress(LauncherUpdateProgressStage.Downloading, downloadedBytes, totalBytes, bytesPerSecond));
+                            lastReportedBytes = downloadedBytes;
+                        }
+                    }
+                }
+
+                if (totalBytes is not null && downloadedBytes < totalBytes.Value)
+                {
+                    throw new EndOfStreamException($"Launcher update stream ended at {downloadedBytes} of {totalBytes.Value} bytes.");
+                }
+                return totalBytes ?? downloadedBytes;
+            }
+            catch (Exception ex) when (IsTransientDownloadFailure(ex))
+            {
+                lastError = ex;
+                if (attempt >= MaxDownloadAttempts)
+                {
+                    break;
+                }
+                await Task.Delay(TimeSpan.FromSeconds(Math.Min(8, attempt * 2)));
+            }
+            catch
+            {
+                throw;
+            }
+        }
+
+        throw new IOException($"Launcher update download failed after {MaxDownloadAttempts} attempts. The connection ended before the complete file arrived; retry the update or configure a proxy.", lastError);
+    }
+
+    private static bool IsTransientDownloadFailure(Exception exception)
+        => exception is HttpRequestException or EndOfStreamException or TaskCanceledException ||
+            exception is IOException io && !io.Message.StartsWith("Insufficient disk space", StringComparison.OrdinalIgnoreCase);
 
     public static void BeginApply(string packagePath, LauncherUpdateManifest manifest)
     {

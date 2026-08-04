@@ -299,6 +299,19 @@ internal static class LauncherSelfTests
             Assert(updateProgress.Any(progress => progress.Stage == LauncherUpdateProgressStage.Downloading && progress.CompletedBytes == verifiedUpdateBytes.Length), "Launcher update download progress completion", lines);
             Assert(updateProgress.Any(progress => progress.Stage == LauncherUpdateProgressStage.Downloading && progress.BytesPerSecond > 0), "Launcher update download speed reporting", lines);
             Assert(updateProgress.Any(progress => progress.Stage == LauncherUpdateProgressStage.Verifying && progress.CompletedBytes == verifiedUpdateBytes.Length), "Launcher update verification progress completion", lines);
+            var resumedLauncherRoot = Path.Combine(testRoot, "resumed-launcher-update");
+            Directory.CreateDirectory(resumedLauncherRoot);
+            var resumedLauncherPartial = Path.Combine(resumedLauncherRoot, "BaChen AI Launcher.exe.partial");
+            await File.WriteAllBytesAsync(resumedLauncherPartial, verifiedUpdateBytes[..(verifiedUpdateBytes.Length / 2)]);
+            var resumedLauncherHandler = new RetryingRangeHandler(verifiedUpdateBytes, failuresBeforeSuccess: 2);
+            using (var resumedLauncherClient = new HttpClient(resumedLauncherHandler))
+            {
+                var resumedLauncherService = new LauncherSelfUpdateService(resumedLauncherClient);
+                var resumedPath = await resumedLauncherService.DownloadVerifiedAsync(verifiedUpdateManifest, resumedLauncherRoot);
+                Assert((await File.ReadAllBytesAsync(resumedPath)).SequenceEqual(verifiedUpdateBytes), "Resumable launcher update survives transient EOF", lines);
+                Assert(!File.Exists(resumedLauncherPartial), "Resumable launcher partial file finalization", lines);
+            }
+            Assert(resumedLauncherHandler.RangeRequests > 0, "Launcher update retries with HTTP Range", lines);
             Assert(LauncherForm.FormatTransferSpeed(12.5D * 1024D * 1024D) == "12.5 MB/s", "Launcher update download speed presentation", lines);
             Assert(LauncherForm.FormatTransferSpeed(640D * 1024D) == "640.0 KB/s", "Launcher update low-speed presentation", lines);
             var sampledAt = TimeSpan.Zero;
@@ -1162,6 +1175,7 @@ internal static class LauncherSelfTests
     private sealed class RetryingRangeHandler(byte[] content, int failuresBeforeSuccess) : HttpMessageHandler
     {
         private int _attempts;
+        public int RangeRequests { get; private set; }
 
         protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
         {
@@ -1171,6 +1185,10 @@ internal static class LauncherSelfTests
                 throw new HttpRequestException("simulated transient download failure");
             }
             var start = request.Headers.Range?.Ranges.FirstOrDefault()?.From ?? 0;
+            if (start > 0)
+            {
+                RangeRequests++;
+            }
             if (start >= content.Length)
             {
                 return Task.FromResult(new HttpResponseMessage(System.Net.HttpStatusCode.RequestedRangeNotSatisfiable));

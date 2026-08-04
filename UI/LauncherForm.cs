@@ -2077,6 +2077,9 @@ internal sealed class LauncherForm : Form
         if (exception is HttpRequestException httpError) return L(
             $"无法连接 GitHub 更新服务。请在“设置”中测试 GitHub 连接或填写代理。\n\n失败详情：{httpError.Message}\n\n手动下载：https://github.com/Bachen-beep/bachen-ai-launcher/releases/latest",
             $"GitHub update services could not be reached. Test the connection or configure a proxy in Settings.\n\nDetails: {httpError.Message}\n\nManual download: https://github.com/Bachen-beep/bachen-ai-launcher/releases/latest");
+        if (exception is IOException downloadError && downloadError.Message.Contains("download failed after", StringComparison.OrdinalIgnoreCase)) return L(
+            "启动器安装包下载连接中断，启动器已自动重试 5 次仍未完成。请检查代理、防火墙或网络后再次点击更新；已下载内容不会被安装。",
+            "The launcher package connection ended during download. Five automatic retries did not complete the file. Check the proxy, firewall, or network and retry; incomplete data was not installed.");
         if (exception is IOException && exception.Message.Contains("disk space", StringComparison.OrdinalIgnoreCase)) return L("磁盘空间不足，无法安全下载更新。", "There is not enough disk space to download the update safely.");
         return exception.Message;
     }
