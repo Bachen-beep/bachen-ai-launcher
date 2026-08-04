@@ -296,7 +296,10 @@ internal static class LauncherSelfTests
                 Assert((await File.ReadAllBytesAsync(downloadedPath)).SequenceEqual(verifiedUpdateBytes), "Verified launcher update download", lines);
             }
             Assert(updateProgress.Any(progress => progress.Stage == LauncherUpdateProgressStage.Downloading && progress.CompletedBytes == verifiedUpdateBytes.Length), "Launcher update download progress completion", lines);
+            Assert(updateProgress.Any(progress => progress.Stage == LauncherUpdateProgressStage.Downloading && progress.BytesPerSecond > 0), "Launcher update download speed reporting", lines);
             Assert(updateProgress.Any(progress => progress.Stage == LauncherUpdateProgressStage.Verifying && progress.CompletedBytes == verifiedUpdateBytes.Length), "Launcher update verification progress completion", lines);
+            Assert(LauncherForm.FormatTransferSpeed(12.5D * 1024D * 1024D) == "12.5 MB/s", "Launcher update download speed presentation", lines);
+            Assert(LauncherForm.FormatTransferSpeed(640D * 1024D) == "640.0 KB/s", "Launcher update low-speed presentation", lines);
 
             Assert(PluginManifestSignatureVerifier.Verify(manifest, publishers).IsTrusted, "Signed manifest verification", lines);
             Assert(manifest.SchemaVersion == 5 && manifest.RequiresLicenseAcceptance, "Plugin license metadata", lines);
@@ -839,7 +842,9 @@ internal static class LauncherSelfTests
         Assert(actionRects.All(rectangle => rectangle.Left >= 0 && rectangle.Right <= 530), "Plugin update actions fit the detail panel", lines);
         Assert(actionRects.Take(4).Select(rectangle => rectangle.Top).Distinct().Count() == 1, "Plugin update action buttons remain on one row", lines);
         Assert(actionRects.SelectMany((left, index) => actionRects.Skip(index + 1).Select(right => (left, right))).All(pair => !pair.left.IntersectsWith(pair.right)), "Plugin update actions do not overlap", lines);
-        Assert(180 < 330, "Launcher update progress indicator remains compact", lines);
+        using var progressFont = new Font("Microsoft YaHei UI", 9.5F, FontStyle.Bold);
+        var fullStatusWidth = LauncherForm.CalculateLauncherUpdateProgressWidth("正在下载并校验启动器（下载 50% · 12.5 MB/s）", progressFont, 330);
+        Assert(fullStatusWidth > 180 && fullStatusWidth <= 330, "Launcher update progress indicator follows full status text width", lines);
     }
 
     private static ServiceProfile ToServiceProfileForSelfTest(this LauncherModelDefinition definition)

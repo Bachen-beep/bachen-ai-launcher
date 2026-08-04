@@ -807,6 +807,8 @@ internal sealed class LauncherForm : Form
     private readonly SafeTextLabel _statusLabel = new();
     private readonly SafeTextLabel _phaseLabel = new();
     private readonly ProgressBar _launcherUpdateProgress = new();
+    private bool _launcherUpdateInProgress;
+    private LauncherUpdateProgress? _latestLauncherUpdateProgress;
     private readonly RichTextBox _log = new();
     private readonly List<LauncherLogEntry> _logEntries = [];
     private readonly Dictionary<string, ServiceRuntimeState> _runtimeStates = new(StringComparer.OrdinalIgnoreCase);
@@ -1036,6 +1038,7 @@ internal sealed class LauncherForm : Form
         if (!IsDisposed)
         {
             _phaseLabel.Text = L(_phaseChinese, _phaseEnglish);
+            UpdateLauncherUpdateProgressWidth();
             _phaseLabel.Invalidate();
         }
     }
@@ -1506,6 +1509,8 @@ internal sealed class LauncherForm : Form
 
     private async Task InstallLauncherUpdateAsync(LauncherUpdateCheck check)
     {
+        try
+        {
             ShowLauncherUpdateProgress();
             SetRuntimePhase("正在下载并校验启动器", "Downloading and verifying launcher");
             var progress = new Progress<LauncherUpdateProgress>(UpdateLauncherUpdateProgress);
@@ -1514,10 +1519,20 @@ internal sealed class LauncherForm : Form
             AppendLog(L($"启动器 {check.LatestVersion.ToString(3)} 校验通过，准备重启。", $"Launcher {check.LatestVersion.ToString(3)} verified; preparing to restart."));
             LauncherSelfUpdateService.BeginApply(packagePath, check.Manifest);
             Application.Exit();
+        }
+        catch
+        {
+            _launcherUpdateInProgress = false;
+            _latestLauncherUpdateProgress = null;
+            _launcherUpdateProgress.Visible = false;
+            throw;
+        }
     }
 
     private void ShowLauncherUpdateProgress()
     {
+        _launcherUpdateInProgress = true;
+        _latestLauncherUpdateProgress = null;
         _launcherUpdateProgress.Value = 0;
         _launcherUpdateProgress.Style = ProgressBarStyle.Marquee;
         _launcherUpdateProgress.MarqueeAnimationSpeed = 28;
@@ -1526,6 +1541,9 @@ internal sealed class LauncherForm : Form
 
     private void UpdateLauncherUpdateProgress(LauncherUpdateProgress progress)
     {
+        _launcherUpdateInProgress = true;
+        _latestLauncherUpdateProgress = progress;
+        _launcherUpdateProgress.Visible = true;
         var totalBytes = progress.TotalBytes.GetValueOrDefault();
         if (totalBytes <= 0)
         {
@@ -1540,10 +1558,54 @@ internal sealed class LauncherForm : Form
             : 85 + (int)Math.Round(sourcePercent * 0.15D, MidpointRounding.AwayFromZero);
         _launcherUpdateProgress.Style = ProgressBarStyle.Continuous;
         _launcherUpdateProgress.Value = Math.Clamp(progressValue, 0, 100);
+        var speed = FormatTransferSpeed(progress.BytesPerSecond);
         _phaseLabel.Text = progress.Stage == LauncherUpdateProgressStage.Downloading
-            ? L($"正在下载并校验启动器（下载 {sourcePercent}%）", $"Downloading and verifying launcher ({sourcePercent}% downloaded)")
+            ? L($"正在下载并校验启动器（下载 {sourcePercent}% · {speed}）", $"Downloading and verifying launcher ({sourcePercent}% downloaded · {speed})")
             : L($"正在下载并校验启动器（校验 {sourcePercent}%）", $"Downloading and verifying launcher ({sourcePercent}% verified)");
+        UpdateLauncherUpdateProgressWidth();
     }
+
+    private void RestoreLauncherUpdateProgressUi()
+    {
+        _launcherUpdateProgress.Visible = _launcherUpdateInProgress;
+        if (_launcherUpdateInProgress && _latestLauncherUpdateProgress is not null)
+        {
+            UpdateLauncherUpdateProgress(_latestLauncherUpdateProgress);
+        }
+    }
+
+    internal static string FormatTransferSpeed(double? bytesPerSecond)
+    {
+        if (bytesPerSecond is null || bytesPerSecond <= 0 || double.IsNaN(bytesPerSecond.Value) || double.IsInfinity(bytesPerSecond.Value))
+        {
+            return "-- MB/s";
+        }
+
+        if (bytesPerSecond.Value >= 1024D * 1024D)
+        {
+            return $"{bytesPerSecond.Value / (1024D * 1024D):0.0} MB/s";
+        }
+
+        if (bytesPerSecond.Value >= 1024D)
+        {
+            return $"{bytesPerSecond.Value / 1024D:0.0} KB/s";
+        }
+
+        return $"{bytesPerSecond.Value:0} B/s";
+    }
+
+    private void UpdateLauncherUpdateProgressWidth()
+    {
+        if (_phaseLabel.Width <= 0 || string.IsNullOrWhiteSpace(_phaseLabel.Text))
+        {
+            return;
+        }
+
+        _launcherUpdateProgress.Width = CalculateLauncherUpdateProgressWidth(_phaseLabel.Text, _phaseLabel.Font, _phaseLabel.Width);
+    }
+
+    internal static int CalculateLauncherUpdateProgressWidth(string statusText, Font font, int availableWidth)
+        => Math.Min(TextRenderer.MeasureText(statusText, font).Width, Math.Max(1, availableWidth));
 
     private async Task<LauncherUpdateCheck> CheckLauncherVersionFromAllSourcesAsync()
     {
@@ -3546,11 +3608,11 @@ internal sealed class LauncherForm : Form
         _phaseLabel.Text = L(_phaseChinese, _phaseEnglish);
         header.Controls.Add(_phaseLabel);
 
-        _launcherUpdateProgress.Bounds = new Rectangle(380, 63, 180, 7);
+        _launcherUpdateProgress.Bounds = new Rectangle(380, 63, 240, 7);
         _launcherUpdateProgress.Minimum = 0;
         _launcherUpdateProgress.Maximum = 100;
         _launcherUpdateProgress.Style = ProgressBarStyle.Continuous;
-        _launcherUpdateProgress.Visible = false;
+        _launcherUpdateProgress.Visible = _launcherUpdateInProgress;
         header.Controls.Add(_launcherUpdateProgress);
 
         var gpuPanel = new Panel { Size = new Size(400, 54), BackColor = Theme.DeepTeal };
@@ -3586,7 +3648,7 @@ internal sealed class LauncherForm : Form
             gpuPanel.Top = 15;
             _phaseLabel.Width = Math.Max(230, gpuPanel.Left - _phaseLabel.Left - 24);
             _launcherUpdateProgress.Left = _phaseLabel.Left;
-            _launcherUpdateProgress.Width = Math.Min(180, _phaseLabel.Width);
+            UpdateLauncherUpdateProgressWidth();
         }
         header.SizeChanged += (_, _) => LayoutHeader();
 
@@ -3923,6 +3985,7 @@ internal sealed class LauncherForm : Form
         }
         RenderLog();
         UpdateGpuIndicator();
+        RestoreLauncherUpdateProgressUi();
     }
 
     private List<PluginUiEntry> BuildPluginEntries()

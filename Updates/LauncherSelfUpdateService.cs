@@ -50,7 +50,8 @@ internal enum LauncherUpdateProgressStage
 internal sealed record LauncherUpdateProgress(
     LauncherUpdateProgressStage Stage,
     long CompletedBytes,
-    long? TotalBytes);
+    long? TotalBytes,
+    double? BytesPerSecond = null);
 
 internal sealed class LauncherSelfUpdateService
 {
@@ -297,6 +298,8 @@ internal sealed class LauncherSelfUpdateService
                 var buffer = new byte[128 * 1024];
                 long downloadedBytes = 0;
                 var lastReportedBytes = 0L;
+                var downloadTimer = Stopwatch.StartNew();
+                var lastReportedAt = TimeSpan.Zero;
                 while (true)
                 {
                     var read = await input.ReadAsync(buffer);
@@ -308,8 +311,14 @@ internal sealed class LauncherSelfUpdateService
                     downloadedBytes += read;
                     if (downloadedBytes - lastReportedBytes >= 256 * 1024 || contentLength == downloadedBytes)
                     {
-                        progress?.Report(new LauncherUpdateProgress(LauncherUpdateProgressStage.Downloading, downloadedBytes, contentLength));
+                        var reportedAt = downloadTimer.Elapsed;
+                        var elapsedSeconds = (reportedAt - lastReportedAt).TotalSeconds;
+                        var bytesPerSecond = elapsedSeconds > 0
+                            ? (downloadedBytes - lastReportedBytes) / elapsedSeconds
+                            : (double?)null;
+                        progress?.Report(new LauncherUpdateProgress(LauncherUpdateProgressStage.Downloading, downloadedBytes, contentLength, bytesPerSecond));
                         lastReportedBytes = downloadedBytes;
+                        lastReportedAt = reportedAt;
                     }
                 }
             }
