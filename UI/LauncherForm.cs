@@ -230,7 +230,16 @@ internal sealed class RoundedPanel : Panel
 internal sealed class RoundedButton : Control
 {
     private readonly System.Windows.Forms.Timer _animationTimer = new() { Interval = 16 };
-    public Color FillColor { get; init; } = Theme.DeepTeal;
+    private Color _fillColor = Theme.DeepTeal;
+    public Color FillColor
+    {
+        get => _fillColor;
+        set
+        {
+            _fillColor = value;
+            Invalidate();
+        }
+    }
     private bool _pressed;
     private float _hoverProgress;
     private float _hoverTarget;
@@ -290,7 +299,7 @@ internal sealed class RoundedButton : Control
             e.Graphics,
             path,
             bodyBounds,
-            Enabled ? 22 + (int)Math.Round(_hoverProgress * 18) : 10,
+            Enabled ? 12 + (int)Math.Round(_hoverProgress * 22) : 7,
             _hoverProgress,
             Enabled ? (int)Math.Round(_hoverProgress * 54) : 0);
         using var innerBorder = new Pen(Color.FromArgb(Enabled ? 48 : 20, Color.White), 1F);
@@ -1131,7 +1140,11 @@ internal sealed class GpuMeter : Control
     }
 }
 
-internal sealed record LauncherLogEntry(DateTime Timestamp, string Message, string? ServiceName, bool IsError);
+internal sealed record LauncherLogEntry(DateTime Timestamp, string Message, string? EnglishMessage, string? ServiceName, bool IsError)
+{
+    public string DisplayMessage(bool useEnglish)
+        => useEnglish && !string.IsNullOrWhiteSpace(EnglishMessage) ? EnglishMessage : Message;
+}
 
 internal enum LauncherLogFilter
 {
@@ -1199,6 +1212,7 @@ internal sealed class LauncherForm : Form
     private RoundedButton? _detailUpdateButton;
     private RoundedButton? _detailStopButton;
     private RoundedButton? _detailUninstallButton;
+    private Panel? _detailActionsPanel;
     private GlassProgressBar? _detailUpdateProgress;
     private bool _pluginUpdateInProgress;
     private string? _updatingPluginId;
@@ -1247,7 +1261,7 @@ internal sealed class LauncherForm : Form
     private ServiceProfile? _selectedStableProfile;
     private string _backgroundUpdateStatusChinese = string.Empty;
     private string _backgroundUpdateStatusEnglish = string.Empty;
-    private ContextMenuStrip? _maintenanceMenu;
+    private MaintenanceCenterForm? _maintenanceCenter;
 
     public LauncherForm()
     {
@@ -1436,7 +1450,7 @@ internal sealed class LauncherForm : Form
             LauncherLogFilter.CurrentService => Enumerable.Empty<LauncherLogEntry>(),
             _ => _logEntries
         }).ToList();
-        _log.Text = string.Concat(entries.Select(entry => $"[{entry.Timestamp:HH:mm:ss}] {entry.Message}{Environment.NewLine}"));
+        _log.Text = string.Concat(entries.Select(entry => $"[{entry.Timestamp:HH:mm:ss}] {entry.DisplayMessage(_useEnglish)}{Environment.NewLine}"));
         _log.SelectionStart = _log.TextLength;
         _log.ScrollToCaret();
         if (_logSummaryLabel is not null)
@@ -1444,7 +1458,7 @@ internal sealed class LauncherForm : Form
             var latest = entries.LastOrDefault();
             _logSummaryLabel.Text = latest is null
                 ? L("暂无运行消息", "No runtime messages")
-                : $"[{latest.Timestamp:HH:mm:ss}] {latest.Message}";
+                : $"[{latest.Timestamp:HH:mm:ss}] {latest.DisplayMessage(_useEnglish)}";
             _logSummaryLabel.ForeColor = latest?.IsError == true ? Color.FromArgb(244, 158, 151) : Color.FromArgb(166, 202, 195);
         }
     }
@@ -1457,6 +1471,7 @@ internal sealed class LauncherForm : Form
 
     private void ToggleLanguage()
     {
+        _maintenanceCenter?.Close();
         _useEnglish = !_useEnglish;
         _pluginCategory = "*";
         Controls.Clear();
@@ -1746,7 +1761,7 @@ internal sealed class LauncherForm : Form
 
         _updateBusy = true;
         SetRuntimePhase("正在检查 GitHub 源码更新", "Checking GitHub source updates");
-        AppendLog(L("正在检查 GitHub 源码更新……", "Checking GitHub source updates..."));
+        AppendLocalizedLog("正在检查 GitHub 源码更新……", "Checking GitHub source updates...");
         try
         {
             var checks = new List<SourceUpdateCheck>();
@@ -1786,7 +1801,7 @@ internal sealed class LauncherForm : Form
         }
         catch (Exception ex)
         {
-            AppendLog(L($"检查更新失败：{ex.Message}", $"Update check failed: {ex.Message}"));
+            AppendLocalizedLog($"检查更新失败：{ex.Message}", $"Update check failed: {ex.Message}");
             SetRuntimePhase("更新检查失败", "Update check failed");
             MessageBox.Show(ex.Message, L("无法检查更新", "Unable to check updates"), MessageBoxButtons.OK, MessageBoxIcon.Error);
         }
@@ -1806,7 +1821,7 @@ internal sealed class LauncherForm : Form
         try
         {
             SetRuntimePhase("正在检查启动器更新", "Checking launcher updates");
-            AppendLog(L("正在验证启动器更新清单……", "Verifying launcher update manifest..."));
+            AppendLocalizedLog("正在验证启动器更新清单……", "Verifying launcher update manifest...");
             var check = await CheckLauncherVersionFromAllSourcesAsync();
             if (!check.IsUpdateAvailable)
             {
@@ -1841,7 +1856,7 @@ internal sealed class LauncherForm : Form
         catch (Exception ex)
         {
             var message = DescribeLauncherUpdateError(ex);
-            AppendLog(L($"启动器更新失败：{message}", $"Launcher update failed: {message}"), null, true);
+            AppendLocalizedLog($"启动器更新失败：{message}", $"Launcher update failed: {message}", null, true);
             MessageBox.Show(message, L("启动器更新失败", "Launcher update failed"), MessageBoxButtons.OK, MessageBoxIcon.Error);
         }
         finally
@@ -1895,7 +1910,7 @@ internal sealed class LauncherForm : Form
             var progress = new Progress<LauncherUpdateProgress>(UpdateLauncherUpdateProgress);
             var packagePath = await _launcherUpdateService.DownloadVerifiedAsync(check.Manifest, progress);
             UpdateLauncherUpdateProgress(new LauncherUpdateProgress(LauncherUpdateProgressStage.Verifying, 1, 1));
-            AppendLog(L($"启动器 {check.LatestVersion.ToString(3)} 校验通过，准备重启。", $"Launcher {check.LatestVersion.ToString(3)} verified; preparing to restart."));
+            AppendLocalizedLog($"启动器 {check.LatestVersion.ToString(3)} 校验通过，准备重启。", $"Launcher {check.LatestVersion.ToString(3)} verified; preparing to restart.");
             LauncherSelfUpdateService.BeginApply(packagePath, check.Manifest);
             Application.Exit();
         }
@@ -1916,6 +1931,7 @@ internal sealed class LauncherForm : Form
         _launcherUpdateProgress.Style = ProgressBarStyle.Marquee;
         _launcherUpdateProgress.MarqueeAnimationSpeed = 28;
         _launcherUpdateProgress.Visible = true;
+        _maintenanceCenter?.ReportProgress(null, L("正在准备启动器更新", "Preparing launcher update"));
     }
 
     private void UpdateLauncherUpdateProgress(LauncherUpdateProgress progress)
@@ -1941,6 +1957,11 @@ internal sealed class LauncherForm : Form
         _phaseLabel.Text = progress.Stage == LauncherUpdateProgressStage.Downloading
             ? L($"正在下载并校验启动器（下载 {sourcePercent}% · {speed}）", $"Downloading and verifying launcher ({sourcePercent}% downloaded · {speed})")
             : L($"正在下载并校验启动器（校验 {sourcePercent}%）", $"Downloading and verifying launcher ({sourcePercent}% verified)");
+        _maintenanceCenter?.ReportProgress(
+            Math.Clamp(progressValue, 0, 100),
+            progress.Stage == LauncherUpdateProgressStage.Downloading
+                ? L($"正在下载启动器 {sourcePercent}% · {speed}", $"Downloading launcher {sourcePercent}% · {speed}")
+                : L($"正在校验启动器 {sourcePercent}%", $"Verifying launcher {sourcePercent}%"));
         UpdateLauncherUpdateProgressWidth();
     }
 
@@ -1995,13 +2016,17 @@ internal sealed class LauncherForm : Form
         var check = await _launcherUpdateService.CheckAsync(
             _settings.LauncherUpdateChannel,
             highestObservedVersion: highestObserved);
-        var sourceSummary = string.Join(" | ", check.Sources.Select(source =>
+        var sourceSummaryChinese = string.Join(" | ", check.Sources.Select(source =>
             source.IsValid
                 ? $"{source.Name}={source.Version!.ToString(3)}"
                 : $"{source.Name}=失败({source.Detail})"));
-        AppendLog(L(
-            $"启动器更新源：{sourceSummary}；采用 {check.SelectedSource} {check.LatestVersion.ToString(3)}",
-            $"Launcher update sources: {sourceSummary}; selected {check.SelectedSource} {check.LatestVersion.ToString(3)}"));
+        var sourceSummaryEnglish = string.Join(" | ", check.Sources.Select(source =>
+            source.IsValid
+                ? $"{source.Name}={source.Version!.ToString(3)}"
+                : $"{source.Name}=failed({source.Detail})"));
+        AppendLocalizedLog(
+            $"启动器更新源：{sourceSummaryChinese}；采用 {check.SelectedSource} {check.LatestVersion.ToString(3)}",
+            $"Launcher update sources: {sourceSummaryEnglish}; selected {check.SelectedSource} {check.LatestVersion.ToString(3)}");
         if (_settings.LauncherUpdateChannel == LauncherUpdateChannel.Stable &&
             (highestObserved is null || check.LatestVersion > highestObserved))
         {
@@ -2101,12 +2126,12 @@ internal sealed class LauncherForm : Form
             var count = checks.Count(check => check.UpdateAvailable || !check.HasLocalBaseline);
             _backgroundUpdateStatusChinese = count == 0 ? "源码已是最新记录" : $"{count} 个源码可检查更新";
             _backgroundUpdateStatusEnglish = count == 0 ? "Sources match tracked versions" : $"{count} source update(s) available";
-            AppendLog(L(_backgroundUpdateStatusChinese, _backgroundUpdateStatusEnglish));
+            AppendLocalizedLog(_backgroundUpdateStatusChinese, _backgroundUpdateStatusEnglish);
             RefreshStatus();
         }
         catch (Exception ex)
         {
-            AppendLog(L($"后台更新检查跳过：{ex.Message}", $"Background update check skipped: {ex.Message}"));
+            AppendLocalizedLog($"后台更新检查跳过：{ex.Message}", $"Background update check skipped: {ex.Message}");
         }
         finally
         {
@@ -2127,7 +2152,7 @@ internal sealed class LauncherForm : Form
         try
         {
             SetRuntimePhase("正在生成更新预览", "Building update preview");
-            AppendLog(L("正在生成更新预览……", "Building update preview..."));
+            AppendLocalizedLog("正在生成更新预览……", "Building update preview...");
             foreach (var source in _updateSources)
             {
                 var check = await FetchUpdateCheckAsync(source);
@@ -2205,7 +2230,7 @@ internal sealed class LauncherForm : Form
                 try
                 {
                     SetRuntimePhase($"正在更新 {source.DisplayName}", $"Updating {source.DisplayName}");
-                    AppendLog(L($"正在更新 {source.DisplayName}……", $"Updating {source.DisplayName}..."));
+                    AppendLocalizedLog($"正在更新 {source.DisplayName}……", $"Updating {source.DisplayName}...");
                     if (check.HasLocalBaseline && !check.UpdateAvailable)
                     {
                         results.Add(L($"{source.DisplayName}：无需更新", $"{source.DisplayName}: already up to date"));
@@ -2298,7 +2323,7 @@ internal sealed class LauncherForm : Form
         catch (Exception ex)
         {
             SetServiceRuntimeState(selected.Profile, ServiceRuntimeState.Error);
-            AppendLog(L($"{check.Source.DisplayName} 更新失败：{ex.Message}", $"{check.Source.DisplayName} update failed: {ex.Message}"), selected.Profile, true);
+            AppendLocalizedLog($"{check.Source.DisplayName} 更新失败：{ex.Message}", $"{check.Source.DisplayName} update failed: {ex.Message}", selected.Profile, true);
             MessageBox.Show(ex.Message, L("插件更新失败", "Plugin update failed"), MessageBoxButtons.OK, MessageBoxIcon.Error);
         }
         finally
@@ -2312,6 +2337,7 @@ internal sealed class LauncherForm : Form
                 _detailUpdateProgress.Visible = false;
             }
             SetRuntimePhase("插件更新流程完成", "Plugin update workflow complete");
+            _maintenanceCenter?.CompleteProgress(L("插件更新流程完成", "Plugin update workflow complete"));
             RefreshStatus();
         }
     }
@@ -2327,6 +2353,7 @@ internal sealed class LauncherForm : Form
         if (total <= 0)
         {
             _detailUpdateProgress.Style = ProgressBarStyle.Marquee;
+            _maintenanceCenter?.ReportProgress(null, FormatPluginUpdateStatus(progress, _useEnglish));
             var unknownTotalSelected = _pluginEntries.FirstOrDefault(entry => entry.Id.Equals(_selectedPluginId, StringComparison.OrdinalIgnoreCase));
             if (_detailStatusLabel is not null && unknownTotalSelected is not null)
             {
@@ -2340,6 +2367,7 @@ internal sealed class LauncherForm : Form
             : 65 + (int)Math.Round(percent * 0.35D, MidpointRounding.AwayFromZero);
         _detailUpdateProgress.Style = ProgressBarStyle.Continuous;
         _detailUpdateProgress.Value = Math.Clamp(value, 0, 100);
+        _maintenanceCenter?.ReportProgress(Math.Clamp(value, 0, 100), FormatPluginUpdateStatus(progress, _useEnglish));
         var selected = _pluginEntries.FirstOrDefault(entry => entry.Id.Equals(_selectedPluginId, StringComparison.OrdinalIgnoreCase));
         if (_detailStatusLabel is not null && selected is not null)
         {
@@ -3020,28 +3048,121 @@ internal sealed class LauncherForm : Form
         return new FirstRunInstallOutcome(result.Definition, checks);
     }
 
-    private ContextMenuStrip CreateMaintenanceMenu()
+    private void ShowMaintenanceCenter()
     {
-        var menu = new ContextMenuStrip();
-        menu.Items.Add(L("检查启动器更新", "Check launcher update"), null, async (_, _) => await CheckLauncherUpdateAsync());
-        menu.Items.Add(L("恢复上一版启动器", "Restore previous launcher"), null, async (_, _) => await RollbackLauncherAsync());
-        menu.Items.Add(new ToolStripSeparator());
-        menu.Items.Add(L("安装签名插件包", "Install signed plugin"), null, async (_, _) => await ShowInstallPluginWizardAsync());
-        menu.Items.Add(L("重新运行首次设置", "Run first-time setup again"), null, async (_, _) => await ShowFirstRunWizardAsync());
-        menu.Items.Add(L("卸载所选插件", "Uninstall selected plugin"), null, async (_, _) => await UninstallSelectedPluginAsync());
-        menu.Items.Add(L("受信任发布者", "Trusted publishers"), null, (_, _) => ShowTrustedPublishersDialog());
-        menu.Items.Add(L("删除 Hugging Face 登录凭据", "Delete Hugging Face credential"), null, (_, _) => DeleteHuggingFaceCredential());
-        menu.Items.Add(new ToolStripSeparator());
-        menu.Items.Add(L("从 GitHub 添加模型", "Add model from GitHub"), null, async (_, _) => await ShowAnalyzedGitHubModelDialogAsync());
-        menu.Items.Add(L("运行环境自检", "Run environment check"), null, (_, _) => ShowEnvironmentReport());
-        menu.Items.Add(L("配置模型目录与端口", "Configure paths and ports"), null, (_, _) => ShowSettingsDialog());
-        menu.Items.Add(L("恢复源码备份", "Restore source backup"), null, async (_, _) => await RestoreBackupAsync());
-        menu.Items.Add(L("恢复插件版本", "Restore plugin version"), null, (_, _) => RestorePluginVersion());
-        menu.Items.Add(L("打开日志目录", "Open logs folder"), null, (_, _) => OpenLogsFolder());
-        menu.Items.Add(L("导出诊断包", "Export diagnostics"), null, (_, _) => ExportDiagnostics());
-        menu.Items.Add(new ToolStripSeparator());
-        menu.Items.Add(L($"启动器版本 {LauncherVersion}", $"Launcher version {LauncherVersion}"))!.Enabled = false;
-        return menu;
+        if (_maintenanceCenter is { IsDisposed: false })
+        {
+            _maintenanceCenter.Activate();
+            return;
+        }
+
+        Task Run(Action action)
+        {
+            action();
+            return Task.CompletedTask;
+        }
+
+        var updateAndRecovery = new MaintenanceCategoryDefinition(
+            L("更新与恢复", "Updates & recovery"),
+            L("检查启动器版本，并在出现问题时恢复经过验证的备份。", "Check launcher releases and restore verified backups when needed."),
+            [
+                new(L("检查启动器更新", "Check launcher update"),
+                    L("验证多个更新源、签名和安装包完整性。", "Verify update sources, signatures, and package integrity."),
+                    L("检查更新", "Check"), Color.FromArgb(31, 121, 108), CheckLauncherUpdateAsync),
+                new(L("恢复上一版启动器", "Restore previous launcher"),
+                    L("退出启动器并恢复最近保留的可执行文件。", "Exit and restore the most recently retained launcher executable."),
+                    L("恢复", "Restore"), Theme.Coral, RollbackLauncherAsync,
+                    () => LauncherSelfUpdateService.GetRollbackPath() is not null),
+                new(L("恢复插件版本", "Restore plugin version"),
+                    L("从安装或卸载备份中选择一个插件版本。", "Choose a plugin version from install or uninstall backups."),
+                    L("选择版本", "Choose"), Color.FromArgb(170, 102, 49), () => Run(RestorePluginVersion), HasRestorablePluginVersion),
+                new(L("恢复源码备份", "Restore source backup"),
+                    L("恢复插件源码更新前创建的 ZIP 备份。", "Restore a ZIP backup created before a plugin source update."),
+                    L("选择备份", "Choose"), Color.FromArgb(170, 102, 49), RestoreBackupAsync, HasRestorableSourceBackup)
+            ]);
+
+        var pluginManagement = new MaintenanceCategoryDefinition(
+            L("插件管理", "Plugin management"),
+            L("安装可信插件、更新当前插件，或导入高级 GitHub 模型。", "Install trusted plugins, update the selection, or import an advanced GitHub model."),
+            [
+                new(L("更新所选插件", "Update selected plugin"),
+                    L("下载最新版源码，实时显示进度、百分比和网速。", "Download the latest source with live progress, percentage, and speed."),
+                    L("更新插件", "Update"), Color.FromArgb(170, 102, 49), UpdateSelectedPluginAsync, CanUpdateSelectedPlugin),
+                new(L("安装签名插件", "Install signed plugin"),
+                    L("使用经过签名验证的 BaChen 插件清单安装。", "Install from a signature-verified BaChen plugin manifest."),
+                    L("选择清单", "Choose"), Color.FromArgb(31, 121, 108), ShowInstallPluginWizardAsync),
+                new(L("从 GitHub 导入（高级）", "Import from GitHub (advanced)"),
+                    L("分析第三方仓库并生成本地启动配置，安装前需确认。", "Analyze a third-party repository and review its generated launch configuration."),
+                    L("分析仓库", "Analyze"), Color.FromArgb(47, 83, 132), ShowAnalyzedGitHubModelDialogAsync),
+                new(L("卸载所选插件", "Uninstall selected plugin"),
+                    L("停止关联进程并将插件移入可恢复备份。", "Stop related processes and move the plugin into a restorable backup."),
+                    L("卸载", "Uninstall"), Theme.Coral, UninstallSelectedPluginAsync,
+                    () => _modelCatalog.Models.Any(model => model.Id.Equals(_selectedPluginId, StringComparison.OrdinalIgnoreCase)))
+            ]);
+
+        var diagnostics = new MaintenanceCategoryDefinition(
+            L("环境与诊断", "Environment & diagnostics"),
+            L("查看运行环境、日志和可用于问题排查的诊断信息。", "Inspect the runtime environment, logs, and troubleshooting information."),
+            [
+                new(L("运行环境自检", "Run environment check"),
+                    L("检查 Python、依赖、模型文件、GPU 和插件路径。", "Check Python, dependencies, model files, GPU, and plugin paths."),
+                    L("开始检查", "Run check"), Color.FromArgb(31, 121, 108), () => Run(ShowEnvironmentReport)),
+                new(L("打开日志目录", "Open logs folder"),
+                    L("在资源管理器中打开当前可用的日志位置。", "Open the current available log location in File Explorer."),
+                    L("打开目录", "Open"), Color.FromArgb(47, 83, 132), () => Run(OpenLogsFolder)),
+                new(L("导出诊断包", "Export diagnostics"),
+                    L("导出脱敏后的配置、状态和运行日志。", "Export redacted configuration, status, and runtime logs."),
+                    L("导出", "Export"), Color.FromArgb(31, 121, 108), () => Run(ExportDiagnostics))
+            ]);
+
+        var securityAndSetup = new MaintenanceCategoryDefinition(
+            L("安全与设置", "Security & setup"),
+            L("管理可信来源、登录凭据和启动器基础配置。", "Manage trusted sources, credentials, and launcher configuration."),
+            [
+                new(L("启动器设置", "Launcher settings"),
+                    L("配置数据目录、端口、更新通道和 GitHub 代理。", "Configure storage, ports, update channel, and GitHub proxy."),
+                    L("打开设置", "Open"), Color.FromArgb(31, 121, 108), () => Run(ShowSettingsDialog)),
+                new(L("受信任发布者", "Trusted publishers"),
+                    L("查看允许签名插件和目录的发布者密钥。", "Review publisher keys trusted for signed plugins and catalogs."),
+                    L("查看", "View"), Color.FromArgb(47, 83, 132), () => Run(ShowTrustedPublishersDialog)),
+                new(L("重新运行首次设置", "Run first-time setup again"),
+                    L("重新选择数据目录并安装可信目录中的插件。", "Choose storage again and install plugins from the trusted catalog."),
+                    L("重新设置", "Run setup"), Color.FromArgb(170, 102, 49), ShowFirstRunWizardAsync),
+                new(L("删除 Hugging Face 凭据", "Delete Hugging Face credential"),
+                    L("删除保存在 Windows 凭据管理器中的登录令牌。", "Delete the login token stored in Windows Credential Manager."),
+                    L("删除凭据", "Delete"), Theme.Coral, () => Run(DeleteHuggingFaceCredential),
+                    () => WindowsCredentialStore.Read(ExternalModelAuthorizationService.HuggingFaceCredentialTarget) is not null)
+            ]);
+
+        _maintenanceCenter = new MaintenanceCenterForm(
+            [updateAndRecovery, pluginManagement, diagnostics, securityAndSetup],
+            LauncherVersion,
+            _useEnglish);
+        _maintenanceCenter.FormClosed += (_, _) => _maintenanceCenter = null;
+        _maintenanceCenter.Show(this);
+    }
+
+    private bool CanUpdateSelectedPlugin()
+    {
+        var selected = _pluginEntries.FirstOrDefault(entry => entry.Id.Equals(_selectedPluginId, StringComparison.OrdinalIgnoreCase));
+        return selected is not null && _availableSourceUpdates.ContainsKey(Path.GetFullPath(selected.Profile.WorkingDirectory));
+    }
+
+    private bool HasRestorableSourceBackup()
+        => _updateSources.Any(source =>
+            Directory.Exists(Path.Combine(source.DeploymentRoot, "launcher-update-backups")) &&
+            Directory.EnumerateFiles(Path.Combine(source.DeploymentRoot, "launcher-update-backups"), "*.zip").Any());
+
+    private bool HasRestorablePluginVersion()
+    {
+        var backupRoots = new[]
+        {
+            Path.Combine(_settings.DataRoot, "backups", "plugin-installs"),
+            Path.Combine(_settings.DataRoot, "backups", "uninstalled-plugins")
+        };
+        return backupRoots.Where(Directory.Exists)
+            .SelectMany(Directory.EnumerateDirectories)
+            .Any(path => File.Exists(Path.Combine(path, ".bachen-plugin-definition.json")));
     }
 
     private void RestorePluginVersion()
@@ -4048,12 +4169,7 @@ internal sealed class LauncherForm : Form
 
         var toolsButton = CreateActionButton(L("工具", "Tools"), Color.FromArgb(37, 110, 103), 96);
         toolsButton.Height = 36;
-        toolsButton.Click += (_, _) =>
-        {
-            _maintenanceMenu?.Dispose();
-            _maintenanceMenu = CreateMaintenanceMenu();
-            _maintenanceMenu.Show(toolsButton, new Point(toolsButton.Width - _maintenanceMenu.PreferredSize.Width, toolsButton.Height));
-        };
+        toolsButton.Click += (_, _) => ShowMaintenanceCenter();
         header.Controls.Add(toolsButton);
         var languageButton = CreateActionButton(_useEnglish ? "中文" : "EN", Color.FromArgb(53, 127, 118), 74);
         languageButton.Height = 36;
@@ -4177,9 +4293,9 @@ internal sealed class LauncherForm : Form
             RowCount = 1,
             BackColor = BackColor
         };
-        mainShell.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 190));
-        mainShell.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 410));
-        mainShell.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+        mainShell.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 180));
+        mainShell.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 32));
+        mainShell.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 68));
         mainShell.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
 
         var navigation = new RoundedPanel
@@ -4190,15 +4306,15 @@ internal sealed class LauncherForm : Form
             CornerRadius = 16
         };
         navigation.Controls.Add(CreateText(L("工作区", "WORKSPACE"), new Rectangle(20, 18, 145, 24), 8F, Color.FromArgb(155, 205, 196), FontStyle.Bold));
-        var pluginsButton = CreateActionButton(L("插件", "Plugins"), Color.FromArgb(37, 125, 115), 150);
+        var pluginsButton = CreateActionButton(L("插件", "Plugins"), Color.FromArgb(37, 125, 115), 140);
         pluginsButton.Location = new Point(20, 54);
-        var updatesButton = CreateActionButton(L("检查更新", "Updates"), Color.FromArgb(31, 91, 87), 150);
+        var updatesButton = CreateActionButton(L("检查更新", "Updates"), Color.FromArgb(31, 91, 87), 140);
         updatesButton.Location = new Point(20, 102);
         updatesButton.Click += async (_, _) => await CheckUpdatesAsync();
-        var healthButton = CreateActionButton(L("环境自检", "Health check"), Color.FromArgb(31, 91, 87), 150);
+        var healthButton = CreateActionButton(L("环境自检", "Health check"), Color.FromArgb(31, 91, 87), 140);
         healthButton.Location = new Point(20, 150);
         healthButton.Click += (_, _) => ShowEnvironmentReport();
-        var settingsButton = CreateActionButton(L("设置", "Settings"), Color.FromArgb(31, 91, 87), 150);
+        var settingsButton = CreateActionButton(L("设置", "Settings"), Color.FromArgb(31, 91, 87), 140);
         settingsButton.Location = new Point(20, 198);
         settingsButton.Click += (_, _) => ShowSettingsDialog();
         navigation.Controls.Add(pluginsButton);
@@ -4323,24 +4439,24 @@ internal sealed class LauncherForm : Form
         detailPanel.Controls.Add(_detailTitleLabel);
         detailPanel.Controls.Add(_detailDescriptionLabel);
         detailPanel.Controls.Add(_detailStatusLabel);
-        detailPanel.Controls.Add(CreateText(L("插件信息", "PLUGIN INFO"), new Rectangle(30, 170, 180, 22), 8F, Color.FromArgb(89, 130, 124), FontStyle.Bold));
-        _detailRootLabel = CreateParagraph(string.Empty, new Rectangle(30, 198, 500, 38), 8F, Theme.Ink, FontStyle.Regular);
-        _detailPortLabel = CreateText(string.Empty, new Rectangle(30, 240, 240, 27), 9F, Theme.Ink, FontStyle.Bold);
-        _detailMemoryLabel = CreateText(string.Empty, new Rectangle(280, 240, 250, 27), 9F, Theme.Ink, FontStyle.Bold);
-        _detailVersionLabel = CreateText(string.Empty, new Rectangle(30, 272, 500, 25), 8.5F, Theme.Ink, FontStyle.Bold);
-        _detailDependencyLabel = CreateParagraph(string.Empty, new Rectangle(30, 301, 500, 44), 8F, Theme.Muted, FontStyle.Regular);
-        _detailTrustLabel = CreateText(string.Empty, new Rectangle(30, 348, 500, 25), 8.5F, Theme.MidTeal, FontStyle.Bold);
+        detailPanel.Controls.Add(CreateText(L("插件信息", "PLUGIN INFO"), new Rectangle(30, 158, 180, 22), 8F, Color.FromArgb(89, 130, 124), FontStyle.Bold));
+        _detailRootLabel = CreateParagraph(string.Empty, new Rectangle(30, 184, 500, 36), 8F, Theme.Ink, FontStyle.Regular);
+        _detailPortLabel = CreateText(string.Empty, new Rectangle(30, 224, 240, 25), 9F, Theme.Ink, FontStyle.Bold);
+        _detailMemoryLabel = CreateText(string.Empty, new Rectangle(280, 224, 250, 25), 9F, Theme.Ink, FontStyle.Bold);
+        _detailVersionLabel = CreateText(string.Empty, new Rectangle(30, 253, 500, 24), 8.5F, Theme.Ink, FontStyle.Bold);
+        _detailDependencyLabel = CreateParagraph(string.Empty, new Rectangle(30, 281, 500, 40), 8F, Theme.Muted, FontStyle.Regular);
+        _detailTrustLabel = CreateText(string.Empty, new Rectangle(30, 325, 500, 24), 8.5F, Theme.MidTeal, FontStyle.Bold);
         detailPanel.Controls.Add(_detailRootLabel);
         detailPanel.Controls.Add(_detailPortLabel);
         detailPanel.Controls.Add(_detailMemoryLabel);
         detailPanel.Controls.Add(_detailVersionLabel);
         detailPanel.Controls.Add(_detailDependencyLabel);
         detailPanel.Controls.Add(_detailTrustLabel);
-        detailPanel.Controls.Add(CreateText(L("启动配置", "LAUNCH PROFILE"), new Rectangle(30, 382, 180, 22), 8F, Color.FromArgb(89, 130, 124), FontStyle.Bold));
+        detailPanel.Controls.Add(CreateText(L("启动配置", "LAUNCH PROFILE"), new Rectangle(30, 360, 180, 22), 8F, Color.FromArgb(89, 130, 124), FontStyle.Bold));
 
         _stableModePanel = new FlowLayoutPanel
         {
-            Location = new Point(30, 410),
+            Location = new Point(30, 386),
             Size = new Size(500, 40),
             BackColor = Color.White,
             WrapContents = false
@@ -4350,32 +4466,39 @@ internal sealed class LauncherForm : Form
         if (_medium is not null) AddStableModeButton(_stableModePanel, "medium", _medium);
         detailPanel.Controls.Add(_stableModePanel);
 
+        _detailActionsPanel = new Panel
+        {
+            Location = new Point(30, 438),
+            Size = new Size(500, 42),
+            BackColor = Color.White
+        };
         _detailPrimaryButton = CreateActionButton(L("启动插件", "Launch plugin"), Theme.DeepTeal, 115);
-        _detailPrimaryButton.Location = new Point(30, 466);
+        _detailPrimaryButton.Location = Point.Empty;
         _detailPrimaryButton.Height = 42;
         _detailPrimaryButton.Click += (_, _) => HandlePrimaryPluginAction();
         _openButton = _detailPrimaryButton;
         _detailUpdateButton = CreateActionButton(L("更新插件", "Update plugin"), Color.FromArgb(170, 102, 49), 115);
-        _detailUpdateButton.Location = new Point(155, 466);
+        _detailUpdateButton.Location = Point.Empty;
         _detailUpdateButton.Height = 42;
         _detailUpdateButton.Visible = false;
         _detailUpdateButton.Click += async (_, _) => await UpdateSelectedPluginAsync();
         var stopButton = CreateActionButton(L("停止AI", "Stop AI"), Theme.Coral, 115);
-        stopButton.Location = new Point(155, 466);
+        stopButton.Location = Point.Empty;
         stopButton.Height = 42;
         stopButton.Click += (_, _) => StopKnownServices();
         _detailStopButton = stopButton;
         _detailUninstallButton = CreateActionButton(L("卸载插件", "Uninstall"), Color.FromArgb(96, 99, 108), 115);
-        _detailUninstallButton.Location = new Point(405, 466);
+        _detailUninstallButton.Location = Point.Empty;
         _detailUninstallButton.Height = 42;
         _detailUninstallButton.Click += async (_, _) => await UninstallSelectedPluginAsync();
-        detailPanel.Controls.Add(_detailPrimaryButton);
-        detailPanel.Controls.Add(_detailUpdateButton);
-        detailPanel.Controls.Add(stopButton);
-        detailPanel.Controls.Add(_detailUninstallButton);
+        _detailActionsPanel.Controls.Add(_detailPrimaryButton);
+        _detailActionsPanel.Controls.Add(_detailUpdateButton);
+        _detailActionsPanel.Controls.Add(stopButton);
+        _detailActionsPanel.Controls.Add(_detailUninstallButton);
+        detailPanel.Controls.Add(_detailActionsPanel);
         _detailUpdateProgress = new GlassProgressBar
         {
-            Location = new Point(30, 520),
+            Location = new Point(30, 492),
             Size = new Size(490, 9),
             Minimum = 0,
             Maximum = 100,
@@ -4385,7 +4508,7 @@ internal sealed class LauncherForm : Form
             Visible = false
         };
         detailPanel.Controls.Add(_detailUpdateProgress);
-        _detailActionHint = CreateParagraph(L("模型启动后，主按钮会自动切换为打开 WebUI。", "The primary action changes to Open WebUI when the service is ready."), new Rectangle(30, 520, 500, 45), 8.5F, Theme.Muted, FontStyle.Regular);
+        _detailActionHint = CreateParagraph(L("模型启动后，主按钮会自动切换为打开 WebUI。", "The primary action changes to Open WebUI when the service is ready."), new Rectangle(30, 492, 500, 42), 8.5F, Theme.Muted, FontStyle.Regular);
         detailPanel.Controls.Add(_detailActionHint);
         detailPanel.SizeChanged += (_, _) =>
         {
@@ -4398,6 +4521,10 @@ internal sealed class LauncherForm : Form
             _detailDependencyLabel.Width = width;
             _detailTrustLabel.Width = width;
             _stableModePanel.Width = width;
+            _detailActionsPanel.Width = width;
+            _detailUpdateProgress.Width = width;
+            _detailActionHint.Width = width;
+            LayoutPluginActionButtons();
         };
         mainShell.Controls.Add(detailPanel, 2, 0);
 
@@ -4601,6 +4728,42 @@ internal sealed class LauncherForm : Form
 
     private static string ServiceKey(ServiceProfile profile) => Path.GetFullPath(profile.WorkingDirectory);
 
+    internal static int[] CalculateEqualActionWidths(int availableWidth, int count, int gap)
+    {
+        if (count <= 0)
+        {
+            return [];
+        }
+
+        var contentWidth = Math.Max(count, availableWidth - Math.Max(0, count - 1) * Math.Max(0, gap));
+        var baseWidth = contentWidth / count;
+        var remainder = contentWidth % count;
+        return Enumerable.Range(0, count)
+            .Select(index => baseWidth + (index < remainder ? 1 : 0))
+            .ToArray();
+    }
+
+    private void LayoutPluginActionButtons()
+    {
+        if (_detailActionsPanel is null)
+        {
+            return;
+        }
+
+        var buttons = new[] { _detailPrimaryButton, _detailUpdateButton, _detailStopButton, _detailUninstallButton }
+            .Where(button => button?.Visible == true)
+            .Cast<RoundedButton>()
+            .ToArray();
+        const int gap = 10;
+        var widths = CalculateEqualActionWidths(_detailActionsPanel.ClientSize.Width, buttons.Length, gap);
+        var x = 0;
+        for (var index = 0; index < buttons.Length; index++)
+        {
+            buttons[index].Bounds = new Rectangle(x, 0, widths[index], _detailActionsPanel.ClientSize.Height);
+            x += widths[index] + gap;
+        }
+    }
+
     private void UpdatePluginUi()
     {
         if (_pluginEntries.Count == 0)
@@ -4688,19 +4851,16 @@ internal sealed class LauncherForm : Form
             _detailUpdateButton.Enabled = sourceUpdateAvailable && selectedState is not (ServiceRuntimeState.Checking or ServiceRuntimeState.Starting or ServiceRuntimeState.Stopping or ServiceRuntimeState.Updating);
             _detailUpdateButton.Invalidate();
         }
-        if (_detailStopButton is not null)
-        {
-            _detailStopButton.Location = sourceUpdateAvailable ? new Point(280, 466) : new Point(155, 466);
-        }
         if (_detailUninstallButton is not null)
         {
-            _detailUninstallButton.Location = sourceUpdateAvailable ? new Point(405, 466) : new Point(280, 466);
             _detailUninstallButton.Enabled = selectedState is not (ServiceRuntimeState.Checking or ServiceRuntimeState.Starting or ServiceRuntimeState.Stopping or ServiceRuntimeState.Updating);
             _detailUninstallButton.Invalidate();
         }
+        LayoutPluginActionButtons();
         if (_detailActionHint is not null)
         {
-            _detailActionHint.Bounds = sourceUpdateAvailable ? new Rectangle(30, 538, 500, 38) : new Rectangle(30, 520, 500, 45);
+            _detailActionHint.Top = sourceUpdateAvailable ? 510 : 492;
+            _detailActionHint.Height = sourceUpdateAvailable ? 38 : 42;
         }
         if (_detailUpdateProgress is not null)
         {
@@ -4919,12 +5079,7 @@ internal sealed class LauncherForm : Form
         var maintenanceButton = CreateActionButton(L("维护工具", "Tools"), Color.FromArgb(40, 108, 126), 116);
         maintenanceButton.Location = new Point(712, 28);
         maintenanceButton.Height = 36;
-        maintenanceButton.Click += (_, _) =>
-        {
-            _maintenanceMenu?.Dispose();
-            _maintenanceMenu = CreateMaintenanceMenu();
-            _maintenanceMenu.Show(maintenanceButton, new Point(maintenanceButton.Width - _maintenanceMenu.PreferredSize.Width, maintenanceButton.Height));
-        };
+        maintenanceButton.Click += (_, _) => ShowMaintenanceCenter();
         header.Controls.Add(maintenanceButton);
 
         var hero = new RoundedPanel
@@ -5766,8 +5921,27 @@ internal sealed class LauncherForm : Form
             || message.Contains("失败", StringComparison.OrdinalIgnoreCase)
             || message.Contains("error", StringComparison.OrdinalIgnoreCase)
             || message.Contains("exception", StringComparison.OrdinalIgnoreCase);
-        _logEntries.Add(new LauncherLogEntry(DateTime.Now, message, service?.Name ?? _activeService?.Name, error));
+        _logEntries.Add(new LauncherLogEntry(DateTime.Now, message, null, service?.Name ?? _activeService?.Name, error));
         _diagnosticsService.Append(message, service?.Name ?? _activeService?.Name, error);
+        RenderLog();
+    }
+
+    private void AppendLocalizedLog(string chinese, string english, ServiceProfile? service = null, bool isError = false)
+    {
+        if (IsDisposed)
+        {
+            return;
+        }
+        if (InvokeRequired)
+        {
+            BeginInvoke(() => AppendLocalizedLog(chinese, english, service, isError));
+            return;
+        }
+        var error = isError || chinese.Contains("失败", StringComparison.OrdinalIgnoreCase)
+            || english.Contains("error", StringComparison.OrdinalIgnoreCase)
+            || english.Contains("exception", StringComparison.OrdinalIgnoreCase);
+        _logEntries.Add(new LauncherLogEntry(DateTime.Now, chinese, english, service?.Name ?? _activeService?.Name, error));
+        _diagnosticsService.Append(chinese, service?.Name ?? _activeService?.Name, error);
         RenderLog();
     }
 

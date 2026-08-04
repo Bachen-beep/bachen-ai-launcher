@@ -842,18 +842,14 @@ internal static class LauncherSelfTests
 
     private static void AssertPluginUpdateActionLayout(List<string> lines)
     {
-        var actionRects = new[]
-        {
-            new Rectangle(30, 466, 115, 42),
-            new Rectangle(155, 466, 115, 42),
-            new Rectangle(280, 466, 115, 42),
-            new Rectangle(405, 466, 115, 42),
-            new Rectangle(30, 520, 490, 8),
-            new Rectangle(30, 538, 500, 38)
-        };
-        Assert(actionRects.All(rectangle => rectangle.Left >= 0 && rectangle.Right <= 530), "Plugin update actions fit the detail panel", lines);
-        Assert(actionRects.Take(4).Select(rectangle => rectangle.Top).Distinct().Count() == 1, "Plugin update action buttons remain on one row", lines);
-        Assert(actionRects.SelectMany((left, index) => actionRects.Skip(index + 1).Select(right => (left, right))).All(pair => !pair.left.IntersectsWith(pair.right)), "Plugin update actions do not overlap", lines);
+        var threeButtonWidths = LauncherForm.CalculateEqualActionWidths(500, 3, 10);
+        var fourButtonWidths = LauncherForm.CalculateEqualActionWidths(500, 4, 10);
+        Assert(threeButtonWidths.SequenceEqual([160, 160, 160]), "Three plugin actions divide the available row equally", lines);
+        Assert(fourButtonWidths.SequenceEqual([118, 118, 117, 117]), "Four plugin actions divide the available row with stable remainder handling", lines);
+        Assert(threeButtonWidths.Sum() + 20 == 500 && fourButtonWidths.Sum() + 30 == 500, "Plugin action rows consume the full available width", lines);
+        Assert(LauncherForm.CalculateEqualActionWidths(280, 4, 10).All(width => width >= 62), "Plugin action buttons retain usable minimum-window widths", lines);
+        var localizedEntry = new LauncherLogEntry(DateTime.Now, "中文日志", "English log", null, false);
+        Assert(localizedEntry.DisplayMessage(false) == "中文日志" && localizedEntry.DisplayMessage(true) == "English log", "Runtime logs re-render in the selected language", lines);
         using var progressFont = new Font("Microsoft YaHei UI", 9.5F, FontStyle.Bold);
         var fullStatusWidth = LauncherForm.CalculateLauncherUpdateProgressWidth("正在下载并校验启动器（下载 50% · 12.5 MB/s）", progressFont, 330);
         Assert(fullStatusWidth > 180 && fullStatusWidth <= 330, "Launcher update progress indicator follows full status text width", lines);
