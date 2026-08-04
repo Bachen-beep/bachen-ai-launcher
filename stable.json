@@ -1,13 +1,13 @@
 {
-  "Version": "0.16.33",
+  "Version": "0.16.34",
   "MinimumCompatibleVersion": "0.11.0",
-  "DownloadUrl": "https://github.com/Bachen-beep/bachen-ai-launcher/releases/download/v0.16.33/BaChen.AI.Launcher.exe",
-  "Sha256": "6B6BE76B5A65D5CBB42A5383C4977F441F05788C89BEEB21F30DCB97CA61FE07",
-  "ReleaseNotesUrl": "https://github.com/Bachen-beep/bachen-ai-launcher/releases/tag/v0.16.33",
-  "PublishedAt": "2026-08-04T05:41:47.7941619+00:00",
+  "DownloadUrl": "https://github.com/Bachen-beep/bachen-ai-launcher/releases/download/v0.16.34/BaChen.AI.Launcher.exe",
+  "Sha256": "9CF19A6C3BD49792C06B3F5DDEB2713D1CBF3EFF94B82EF6379B55B50CB83375",
+  "ReleaseNotesUrl": "https://github.com/Bachen-beep/bachen-ai-launcher/releases/tag/v0.16.34",
+  "PublishedAt": "2026-08-04T08:11:23.5503126+00:00",
   "Signature": {
     "KeyId": "bachen-launcher-release-2026",
     "Algorithm": "RSA-SHA256",
-    "Value": "ZOEVg9g8fYMR4yQdw7NeZwDeLBPWiRQ1StT8InZGyht9rN39fpcNYx9yBWvGcgIExd6XTjr3ypG509vU16NlSMyOEqVNn17D1z/U8ySKjRlHtkPVJqWUOKi6iNJktFJMhIWhsX\u002BG1kvU5sb1Rh5yjWcZr0twYYhq471iYZEGWOijc4cfVAMZ4ZhbtN0ArDEtmb0vcr1XbdJIs\u002Bd2RLXFd/fz9Qktp43957/YbkDHE8lKDT6xKbHALdeTOPSElsT\u002B7/r\u002BxM8mkILUDONUzHfOtcQTNf4aChM6sXNZpzG4BFx7ItTgtMmoRDQa6z5HZm4u0906uzlQp7KO/6z\u002B0ZKIKIBvhVL\u002BFyNXxR8DbBW2dzQJUnqgZ6vmRDkvyv\u002B5uo\u002B4MaFcLuLKWD9orAKTPnHclGZcTG2F0zUUuOK7VcZCxAGogsaUKVpcGgCj3AEm5S4Hkwim5HAiozO0Gtx4rBOzP/4\u002BLgQWO2EsJL2AdQ0HHifH/Twd/RAAgm5S/WC1X61N"
+    "Value": "0zWrmdIvBLSk3tzEKvbWKp0QjdJ83fCftSraXTRa37ciUJ1Ao8Um7Q8Av31E8NwGCKeyPCtYUg6YVwqYltcZvMX1G6O9HInrqK3/mrdHfPisNcbayazANVcwlWrFTdKvcVmomQM79UPm7iEvyw0WzkFxllAUFxD8Sn0L6708SNU3swl15Wo7IJIarZfP/X1YVsQwuxjg4xmJHcHzVs5hs2KD6gJKpSTQqDfwuu2A9eIXr3LWk\u002BKrjm\u002BWV4YVgaLLP7M5G5vJcCYugG/l/4UlnmBZsLH8wiV7kOXTAA3oHpNBBVru0s/bfvmzzv/p2AsNWfsNoIxbYkWQZODG9\u002BOnCALQA/Z2/l8\u002BlVcQMnfQWsY\u002B1h2f70BntAr/tNzAqcjV/BCC1e8aF617RnZGI1wybRpGJBJ777a00/ouVUtL6srR4h5DKGPs/z/P3lWb\u002Bz2LUSg7Q/TnyJ03wHheZqKn3IPf5W1T5aidX6Te8d5nvqF6R/aKBpcMXCQlU8SL8EdB"
   }
 }
