@@ -1,13 +1,13 @@
 {
-  "Version": "0.16.29",
+  "Version": "0.16.30",
   "MinimumCompatibleVersion": "0.11.0",
-  "DownloadUrl": "https://github.com/Bachen-beep/bachen-ai-launcher/releases/download/v0.16.29/BaChen.AI.Launcher.exe",
-  "Sha256": "A65D1F6087111C2CAEFFBD7CAC6FAF7811B14C473D7D23A6637D50B2FABEA83A",
-  "ReleaseNotesUrl": "https://github.com/Bachen-beep/bachen-ai-launcher/releases/tag/v0.16.29",
-  "PublishedAt": "2026-08-04T02:51:44.1079474+00:00",
+  "DownloadUrl": "https://github.com/Bachen-beep/bachen-ai-launcher/releases/download/v0.16.30/BaChen.AI.Launcher.exe",
+  "Sha256": "A2483094F22CBD82138EBA7695D16E697E27625B5B6C355F9C8140BB1F0B8EF3",
+  "ReleaseNotesUrl": "https://github.com/Bachen-beep/bachen-ai-launcher/releases/tag/v0.16.30",
+  "PublishedAt": "2026-08-04T03:57:58.630046+00:00",
   "Signature": {
     "KeyId": "bachen-launcher-release-2026",
     "Algorithm": "RSA-SHA256",
-    "Value": "ead8IGHW1e2dpbBX73jqY7N6HJmrHFa7XjaGtfdiVGGgTo7RuRsoZd354eLymE4w25GytCNvCDulgdNc\u002BO0tcOsiBkRqXU\u002BIOrlrRzgA3sSvOaZFxubcmBKoxSNFOOG6kFJn1c8tzRrA0gX9aiat2gxWp9F1CywL1wWoIlnjWq\u002Boh5DrUvVEgD0e4APg1z3Gj\u002BH1yNxAQ1D0q6vFC130RG/x\u002BrnXS63P1nqF62Rz5Vz9f6YSGg10j0PPn6CK4SKCIvEAMvEZ2B9dApOb6roe7qCckwecf0p9DILac5fcmN9CwrTIiFlZExRWmaW\u002BEMSmFErVc4/7m7k3U1e8Q9K/B\u002Bw\u002BHeBFkakiVHx35FvhTvMQ7I5\u002BdmoAPuCC/Hf0s0PF4RzfycLuaG9iD8Z7dGfxuROof9dFuGtK/hak6pN030zZxe4gMmgQSf\u002BLw/ydlWVOrxK2YPz7Zk6OlRDb8qXz56Ke7DDdEbUqYg9U/PvnEkvLgd1vrGwYoINP0o7ursl9"
+    "Value": "G2KnuexRqIp\u002BAa5DPBU5sB3In8N25AGZiIwVICi7d7iwCx7lH\u002BxRp80iX0/YZkINwAa78MB6U3BM9SIbNwYfKuYkV0h3jiNrULNe4zzSVcqUEiBCA4KFSnshBrYK9VYPv1s6wJfBF4X2AKUsutPF\u002BtNuf9ORzIzkbyYak/vUEmZp2lXEziyNonIFkjSfLHLsVYYMFKqlKiB8fA\u002BP0WkfiP0Q7ef4EZY\u002B37/9hUVnwvc\u002BpHGmwhAVeV/YJsLp2KkOmG6fNthVijxptEDoVKG336QPvBV4OvPc1ZorwlgS3SIlMoPRytudCTf43cN5BjMBZeBVA1OjY6c2kdy2yKXsEsPRLjVqZPOG2ZCLgkqe4ufcyq4Cz6q2yAiNzHpYeMXMf3AOSe3yl15ghGBcUwl3a191ot4OjxjpGTnV815kE2fgJFtDP9k1f3iNNiacdEtkAMktsjI509Pe/9XtAXFEmkRStCOEPw\u002BR61ZK50zaTjJz3/RRmbcrV8XS3wErnFU4"
   }
 }
