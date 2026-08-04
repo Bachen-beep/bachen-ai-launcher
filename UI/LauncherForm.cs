@@ -3143,6 +3143,7 @@ internal sealed class LauncherForm : Form
             _useEnglish);
         _maintenanceCenter.FormClosed += (_, _) => _maintenanceCenter = null;
         _maintenanceCenter.Show(this);
+        _maintenanceCenter.CenterOverOwner(this);
     }
 
     private bool CanUpdateSelectedPlugin()
@@ -4324,6 +4325,19 @@ internal sealed class LauncherForm : Form
         navigation.Controls.Add(updatesButton);
         navigation.Controls.Add(healthButton);
         navigation.Controls.Add(settingsButton);
+        var workspaceButtons = new[] { pluginsButton, updatesButton, healthButton, settingsButton };
+        void LayoutWorkspaceButtons()
+        {
+            var buttonWidth = Math.Min(140, Math.Max(116, navigation.ClientSize.Width - 28));
+            var left = Math.Max(14, (navigation.ClientSize.Width - buttonWidth) / 2);
+            foreach (var button in workspaceButtons)
+            {
+                button.Width = buttonWidth;
+                button.Left = left;
+            }
+        }
+        navigation.SizeChanged += (_, _) => LayoutWorkspaceButtons();
+        LayoutWorkspaceButtons();
         navigation.Controls.Add(CreateText(L("单模型安全模式", "SINGLE MODEL MODE"), new Rectangle(20, 270, 150, 25), 8F, Color.FromArgb(159, 211, 201), FontStyle.Bold));
         navigation.Controls.Add(CreateParagraph(L("启动新插件前会检查端口与显存占用。", "Ports and GPU memory are checked before launch."), new Rectangle(20, 302, 150, 72), 8F, Color.FromArgb(202, 229, 223), FontStyle.Regular));
         mainShell.Controls.Add(navigation, 0, 0);

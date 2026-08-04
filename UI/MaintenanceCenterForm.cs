@@ -168,6 +168,26 @@ internal sealed class MaintenanceCenterForm : Form
         SelectCategory(0);
     }
 
+    public void CenterOverOwner(Form owner)
+    {
+        if (IsDisposed || owner.IsDisposed)
+        {
+            return;
+        }
+
+        var ownerOrigin = owner.PointToScreen(Point.Empty);
+        var ownerCenter = new Point(
+            ownerOrigin.X + owner.ClientSize.Width / 2,
+            ownerOrigin.Y + owner.ClientSize.Height / 2);
+        var workingArea = Screen.FromControl(owner).WorkingArea;
+        var x = ownerCenter.X - Width / 2;
+        var y = ownerCenter.Y - Height / 2;
+        x = Math.Clamp(x, workingArea.Left, workingArea.Right - Width);
+        y = Math.Clamp(y, workingArea.Top, workingArea.Bottom - Height);
+        StartPosition = FormStartPosition.Manual;
+        Location = new Point(x, y);
+    }
+
     public void ReportProgress(int? percent, string message)
     {
         if (IsDisposed)
