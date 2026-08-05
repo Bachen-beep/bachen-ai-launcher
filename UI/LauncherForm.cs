@@ -1261,6 +1261,9 @@ internal sealed class LauncherForm : Form
     private string _backgroundUpdateStatusChinese = string.Empty;
     private string _backgroundUpdateStatusEnglish = string.Empty;
     private SettingsWorkspace? _settingsWorkspace;
+    private RoundedButton? _pluginsWorkspaceButton;
+    private RoundedButton? _settingsWorkspaceButton;
+    private bool _languageSwitching;
     private Panel? _logResizeGrip;
     private bool _resizingLogWindow;
     private int _logResizeStartScreenY;
@@ -1542,11 +1545,35 @@ internal sealed class LauncherForm : Form
 
     private void ToggleLanguage()
     {
+        if (_languageSwitching)
+        {
+            return;
+        }
+
+        var wasSettingsVisible = _settingsPanel?.Visible == true;
+        var settingsCategory = _settingsWorkspace?.SelectedCategory ?? 0;
+        _languageSwitching = true;
         _useEnglish = !_useEnglish;
-        _pluginCategory = "*";
-        Controls.Clear();
-        InitializeUi();
-        RefreshStatus();
+        SuspendLayout();
+        try
+        {
+            Controls.Clear();
+            InitializeUi();
+            RefreshStatus();
+            if (wasSettingsVisible)
+            {
+                ShowSettingsWorkspace(settingsCategory);
+            }
+            else
+            {
+                ShowPluginWorkspace();
+            }
+        }
+        finally
+        {
+            ResumeLayout(true);
+            _languageSwitching = false;
+        }
     }
 
     private static void MigrateLegacyConfiguration()
@@ -3178,6 +3205,7 @@ internal sealed class LauncherForm : Form
         _detailPanel?.Hide();
         _settingsPanel.Show();
         _settingsPanel.BringToFront();
+        SetWorkspaceSelection(settingsSelected: true);
         _settingsWorkspace?.ShowCategory(category);
     }
 
@@ -3187,7 +3215,24 @@ internal sealed class LauncherForm : Form
         _pluginPanel?.Show();
         _detailPanel?.Show();
         _settingsWorkspace?.Hide();
+        SetWorkspaceSelection(settingsSelected: false);
         UpdatePluginUi();
+    }
+
+    private void SetWorkspaceSelection(bool settingsSelected)
+    {
+        if (_pluginsWorkspaceButton is not null)
+        {
+            _pluginsWorkspaceButton.FillColor = settingsSelected
+                ? Color.FromArgb(31, 91, 87)
+                : Color.FromArgb(37, 125, 115);
+        }
+        if (_settingsWorkspaceButton is not null)
+        {
+            _settingsWorkspaceButton.FillColor = settingsSelected
+                ? Color.FromArgb(37, 125, 115)
+                : Color.FromArgb(31, 91, 87);
+        }
     }
 
     private Control CreateInlineSettingsCard()
@@ -4488,10 +4533,10 @@ internal sealed class LauncherForm : Form
             BorderWidth = 1
         };
         _logHost.Controls.Add(logCard);
-        logCard.Controls.Add(CreateText(L("运行日志", "Runtime log"), new Rectangle(20, 8, 110, 31), 11F, Color.FromArgb(211, 239, 232), FontStyle.Bold));
-        _logSummaryLabel = CreateText(L("暂无运行消息", "No runtime messages"), new Rectangle(142, 9, 700, 30), 8.5F, Color.FromArgb(166, 202, 195), FontStyle.Regular);
+        logCard.Controls.Add(CreateText(L("运行日志", "Runtime log"), new Rectangle(28, 10, 130, 29), 11F, Color.FromArgb(211, 239, 232), FontStyle.Bold));
+        _logSummaryLabel = CreateText(L("暂无运行消息", "No runtime messages"), new Rectangle(174, 10, 700, 29), 8.5F, Color.FromArgb(166, 202, 195), FontStyle.Regular);
         logCard.Controls.Add(_logSummaryLabel);
-        _logFollowStateLabel = CreateText(L("正在跟随最新输出", "Following live output"), new Rectangle(20, 48, 200, 24), 8F, Color.FromArgb(134, 200, 187), FontStyle.Bold);
+        _logFollowStateLabel = CreateText(L("正在跟随最新输出", "Following live output"), new Rectangle(28, 49, 200, 24), 8F, Color.FromArgb(134, 200, 187), FontStyle.Bold);
         logCard.Controls.Add(_logFollowStateLabel);
 
         var allLogsButton = CreateActionButton(L("全部", "All"), Color.FromArgb(35, 104, 98), 68);
@@ -4556,7 +4601,7 @@ internal sealed class LauncherForm : Form
         void LayoutLogCard()
         {
             _logSummaryLabel.Width = Math.Max(180, logCard.ClientSize.Width - _logSummaryLabel.Left - 20);
-            var x = _logFollowStateLabel.Right + 12;
+            var x = _logFollowStateLabel.Right + 16;
             foreach (var button in logButtons)
             {
                 button.Location = new Point(x, 49);
@@ -4610,6 +4655,9 @@ internal sealed class LauncherForm : Form
         pluginsButton.Click += (_, _) => ShowPluginWorkspace();
         navigation.Controls.Add(pluginsButton);
         navigation.Controls.Add(settingsButton);
+        _pluginsWorkspaceButton = pluginsButton;
+        _settingsWorkspaceButton = settingsButton;
+        SetWorkspaceSelection(settingsSelected: false);
         var workspaceButtons = new[] { pluginsButton, settingsButton };
         void LayoutWorkspaceButtons()
         {
@@ -5665,15 +5713,14 @@ internal sealed class LauncherForm : Form
         };
     }
 
-    private static SafeTextLabel CreateWorkspaceButton(string text, Color color, int width, int height)
+    private static RoundedButton CreateWorkspaceButton(string text, Color color, int width, int height)
     {
-        return new SafeTextLabel
+        return new RoundedButton
         {
             Text = text,
             Size = new Size(width, height),
-            BackColor = color,
+            FillColor = color,
             ForeColor = Color.White,
-            TextAlign = ContentAlignment.MiddleCenter,
             Cursor = Cursors.Hand,
             Font = new Font("Microsoft YaHei UI", 8.5F, FontStyle.Bold)
         };

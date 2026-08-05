@@ -146,6 +146,8 @@ internal sealed class SettingsWorkspace : Panel
         SelectCategory(Math.Clamp(index, 0, _categories.Count - 1));
     }
 
+    public int SelectedCategory => _selectedCategory;
+
     public void ReportProgress(int? percent, string message)
     {
         _busy = true;
@@ -373,13 +375,27 @@ internal sealed class SettingsActionRow : Control
         PaintSurface.DrawText(e.Graphics, _action.Title, titleFont, new Rectangle(16, 10, Math.Max(180, Width - 188), 24), Theme.Ink, StringAlignment.Near);
         PaintSurface.DrawParagraph(e.Graphics, _action.Description, descriptionFont, new Rectangle(16, 37, Math.Max(180, Width - 188), 30), Theme.Muted);
 
-        var buttonBounds = new Rectangle(Math.Max(16, Width - 148), 20, 132, 36);
+        var buttonBounds = new Rectangle(Math.Max(16, Width - 148), 18, 132, 40);
         var buttonColor = !Enabled
             ? Color.FromArgb(176, 190, 187)
             : _hovered ? ControlPaint.Light(_action.ButtonColor, 0.08F) : _action.ButtonColor;
+        using var buttonPath = CreatePillPath(buttonBounds);
         using var buttonBrush = new SolidBrush(buttonColor);
-        e.Graphics.FillRectangle(buttonBrush, buttonBounds);
+        e.Graphics.FillPath(buttonBrush, buttonPath);
+        GlassPaint.DrawReflection(e.Graphics, buttonPath, buttonBounds, Enabled ? 8 : 6, _hovered ? 0.2F : 0F, 0);
+        using var buttonBorder = new Pen(Color.FromArgb(26, Color.White), 1F);
+        e.Graphics.DrawPath(buttonBorder, buttonPath);
         using var buttonFont = new Font("Microsoft YaHei UI", 8.5F, FontStyle.Bold);
         PaintSurface.DrawText(e.Graphics, _action.ButtonText, buttonFont, buttonBounds, Color.White, StringAlignment.Center);
+    }
+
+    private static System.Drawing.Drawing2D.GraphicsPath CreatePillPath(Rectangle bounds)
+    {
+        var path = new System.Drawing.Drawing2D.GraphicsPath();
+        var diameter = Math.Max(2, Math.Min(bounds.Height, bounds.Width));
+        path.AddArc(bounds.Left, bounds.Top, diameter, diameter, 90, 180);
+        path.AddArc(bounds.Right - diameter, bounds.Top, diameter, diameter, 270, 180);
+        path.CloseFigure();
+        return path;
     }
 }
