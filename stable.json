@@ -1,13 +1,13 @@
 {
-  "Version": "0.16.38",
+  "Version": "0.16.39",
   "MinimumCompatibleVersion": "0.11.0",
-  "DownloadUrl": "https://github.com/Bachen-beep/bachen-ai-launcher/releases/download/v0.16.38/BaChen.AI.Launcher.exe",
-  "Sha256": "32C9530E06197F481FCB7CCEDAADC73960C126329BBF8DEB6E7803B57946A1B1",
-  "ReleaseNotesUrl": "https://github.com/Bachen-beep/bachen-ai-launcher/releases/tag/v0.16.38",
-  "PublishedAt": "2026-08-04T11:20:01.751738+00:00",
+  "DownloadUrl": "https://github.com/Bachen-beep/bachen-ai-launcher/releases/download/v0.16.39/BaChen.AI.Launcher.exe",
+  "Sha256": "5A821DD43D26B6B6DBC56380F317343E17FD025D0770B569C1C35C789792DC30",
+  "ReleaseNotesUrl": "https://github.com/Bachen-beep/bachen-ai-launcher/releases/tag/v0.16.39",
+  "PublishedAt": "2026-08-05T03:07:32.7906629+00:00",
   "Signature": {
     "KeyId": "bachen-launcher-release-2026",
     "Algorithm": "RSA-SHA256",
-    "Value": "duK7LdcYRGTRh/\u002BUNRx3OUkDpklDipxdAMiYP4aV1pxw6KOS5WYQEANsoWYchDHK\u002BN4r4qc56EHAb8BhCj1Yx3oR9pPo6SNpFZYcaAwyqs\u002BY/bYQwzalU4AQxyPag2wV8db8UP/ER72t2cumu3ZFbBB7\u002B86nJFZlUPC7A/Z0Pcz4lDaVbWbgR4dCUy/Q3vs3C1\u002BjZ1zujoCiVjzYpR5HT\u002BdabzI0J0JH8kzDWx87kuaRgoeSnvfKZKIl0WiErjfCUjwpwzHPhftkR34KtZQ8U1C4wd9HMzuHQx3m9jtVWz6UHXqyM6vTojM\u002B3C0aST/YKSHH45bfuWrJ3ZtwOSRibAOp928o19ipKwsiQuL3AJuryqjjkFi1sn\u002BdaDA/LXiOWRs99MdFWPA9kEFq/v0JjGxT41JBsSy8sHIHms8/oj2582sixZJETZ13Cvai2aBQdXN0J/rgF4Nm7UIjgdBDJmbaXvecZs0IZ/BT1u7FO1GCNd5yZwkDdf2fNYJL3I2k"
+    "Value": "w\u002BeMusu9GlIOqKSE8oaVVteTqtWHSUes\u002BznIT4UCFtjyb9AwxfA4DZaI/zwVp4QLZXni3f\u002BsZJuriymVRvGZ9hzw4w0Yhs8DC/PxXwYtcbYn7bCw\u002Btb3qM3/27g8TJptxUPdEECfdDiYHHOOna1cLpsFeUf6Ad8Ej3nqCjm9w8CBMxDqlmX1Bnpw77MVMCjvaCP3XxO3XA\u002Bgz4fDdOEyyWy0fTWWyy/0Faq9ekYXfcwgeRqz\u002BudAw9HH2OG0VjKTm0C34\u002BY/mhchZW\u002BnGN4qhUJ7WpoC/E28mlNADqCE8YkbhT53qb2CuWs5y92fsluQ0wGW1BD47dZWDSc8UA5KgNguzK1i1FTsRo8Uqo0cCvJk1vss0M65BqOJ2aBdB\u002BTrAg6Ok9dNp89ta7RUPcIDk/xgCH49klf357SqoDHYdxxhRpn8VTIKebNO0Hu7ZX64DrL4S86SCrNIvaXO0IwjGrNTzxq19MWlhqiF0OrPCy23IwuWuYlXFI/MI/q1\u002BP7f"
   }
 }
