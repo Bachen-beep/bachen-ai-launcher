@@ -3,6 +3,7 @@ namespace BaChenAiLauncher;
 /// <summary>一级界面内的设置与维护工作台。</summary>
 internal sealed class SettingsWorkspace : Panel
 {
+    private const int CornerRadius = 16;
     private readonly IReadOnlyList<MaintenanceCategoryDefinition> _categories;
     private readonly bool _useEnglish;
     private readonly Func<Control> _createSettingsCard;
@@ -35,6 +36,7 @@ internal sealed class SettingsWorkspace : Panel
         Dock = DockStyle.Fill;
         BackColor = Color.White;
         Visible = false;
+        SetStyle(ControlStyles.AllPaintingInWmPaint | ControlStyles.OptimizedDoubleBuffer | ControlStyles.ResizeRedraw, true);
 
         _navigation.Dock = DockStyle.Left;
         _navigation.Width = 194;
@@ -129,6 +131,12 @@ internal sealed class SettingsWorkspace : Panel
         _content.SizeChanged += (_, _) => LayoutFooter();
         LayoutFooter();
         SelectCategory(0);
+    }
+
+    protected override void OnSizeChanged(EventArgs e)
+    {
+        base.OnSizeChanged(e);
+        ApplyRoundedRegion();
     }
 
     public void ShowCategory(int index = 0)
@@ -292,6 +300,24 @@ internal sealed class SettingsWorkspace : Panel
             BackColor = Theme.DeepTeal,
             Anchor = anchor
         });
+    }
+
+    private void ApplyRoundedRegion()
+    {
+        if (Width < 2 || Height < 2)
+        {
+            return;
+        }
+
+        var diameter = Math.Min(CornerRadius * 2, Math.Min(Width, Height));
+        using var path = new System.Drawing.Drawing2D.GraphicsPath();
+        path.AddArc(0, 0, diameter, diameter, 180, 90);
+        path.AddArc(Width - diameter, 0, diameter, diameter, 270, 90);
+        path.AddArc(Width - diameter, Height - diameter, diameter, diameter, 0, 90);
+        path.AddArc(0, Height - diameter, diameter, diameter, 90, 90);
+        path.CloseFigure();
+        Region?.Dispose();
+        Region = new Region(path);
     }
 }
 

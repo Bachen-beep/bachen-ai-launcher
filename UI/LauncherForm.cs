@@ -1165,6 +1165,10 @@ internal enum LauncherUpdateChoice
 
 internal sealed class LauncherForm : Form
 {
+    private const int MinimumRuntimeLogHeight = 220;
+    private const int MaximumRuntimeLogHeight = 560;
+    private const int PreferredRuntimeLogHeight = 300;
+    private const int PreferredWindowHeight = 1090;
     private static readonly string SettingsPath = Path.Combine(
         LauncherPaths.UserConfigDirectory,
         "launcher.settings.json");
@@ -1206,6 +1210,8 @@ internal sealed class LauncherForm : Form
     private RoundedButton? _detailStopButton;
     private RoundedButton? _detailUninstallButton;
     private RoundedPanel? _detailPanel;
+    private RoundedPanel? _pluginPanel;
+    private RoundedPanel? _settingsPanel;
     private Panel? _detailActionsPanel;
     private GlassProgressBar? _detailUpdateProgress;
     private bool _pluginUpdateInProgress;
@@ -1258,8 +1264,9 @@ internal sealed class LauncherForm : Form
     private Panel? _logResizeGrip;
     private bool _resizingLogWindow;
     private int _logResizeStartScreenY;
-    private int _logResizeStartHeight;
+    private Rectangle _logResizeStartBounds;
     private int _logResizeStartLogHeight;
+    private bool _initialWindowBoundsApplied;
 
     public LauncherForm()
     {
@@ -1284,6 +1291,7 @@ internal sealed class LauncherForm : Form
         _gpuRefreshTimer.Tick += (_, _) => UpdateGpuIndicator();
         Shown += async (_, _) =>
         {
+            ApplyPreferredWindowBounds();
             _gpuRefreshTimer.Start();
             if (!_settings.FirstRunCompleted)
             {
@@ -1585,7 +1593,7 @@ internal sealed class LauncherForm : Form
         var plugins = Path.Combine(normalizedRoot, "plugins");
         return new LauncherSettings
         {
-            SchemaVersion = 5,
+            SchemaVersion = 7,
             DataRoot = normalizedRoot,
             WooshRoot = Path.Combine(plugins, "Woosh"),
             StableRoot = Path.Combine(plugins, "Stable Audio 3"),
@@ -1598,10 +1606,15 @@ internal sealed class LauncherForm : Form
 
     private static void NormalizeSettings(LauncherSettings settings)
     {
-        settings.SchemaVersion = 5;
+        var previousSchemaVersion = settings.SchemaVersion;
+        if (previousSchemaVersion < 7 && settings.RuntimeLogHeight < PreferredRuntimeLogHeight)
+        {
+            settings.RuntimeLogHeight = PreferredRuntimeLogHeight;
+        }
+        settings.SchemaVersion = 7;
         settings.GitHubProxyUrl = TryValidateProxyUrl(settings.GitHubProxyUrl, out _) ? settings.GitHubProxyUrl.Trim() : string.Empty;
         settings.DataRoot = MigrateRenamedPath(settings.DataRoot);
-        settings.RuntimeLogHeight = Math.Clamp(settings.RuntimeLogHeight, 180, 480);
+        settings.RuntimeLogHeight = Math.Clamp(settings.RuntimeLogHeight, MinimumRuntimeLogHeight, MaximumRuntimeLogHeight);
         settings.WooshRoot = MigrateRenamedPath(settings.WooshRoot);
         settings.StableRoot = MigrateRenamedPath(settings.StableRoot);
         settings.IndexTtsRoot = MigrateRenamedPath(settings.IndexTtsRoot);
@@ -2757,7 +2770,7 @@ internal sealed class LauncherForm : Form
 
         var updated = new LauncherSettings
         {
-            SchemaVersion = 5,
+            SchemaVersion = 7,
             DataRoot = dataRootBox.Text.Trim(),
             WooshRoot = _settings.WooshRoot,
             StableRoot = _settings.StableRoot,
@@ -3156,11 +3169,23 @@ internal sealed class LauncherForm : Form
 
     private void ShowSettingsWorkspace(int category = 0)
     {
+        if (_settingsWorkspace is null || _settingsPanel is null)
+        {
+            return;
+        }
+
+        _pluginPanel?.Hide();
+        _detailPanel?.Hide();
+        _settingsPanel.Show();
+        _settingsPanel.BringToFront();
         _settingsWorkspace?.ShowCategory(category);
     }
 
     private void ShowPluginWorkspace()
     {
+        _settingsPanel?.Hide();
+        _pluginPanel?.Show();
+        _detailPanel?.Show();
         _settingsWorkspace?.Hide();
         UpdatePluginUi();
     }
@@ -3329,7 +3354,7 @@ internal sealed class LauncherForm : Form
 
         _resizingLogWindow = true;
         _logResizeStartScreenY = _logResizeGrip.PointToScreen(eventArgs.Location).Y;
-        _logResizeStartHeight = Height;
+        _logResizeStartBounds = Bounds;
         _logResizeStartLogHeight = _logHost.Height;
         _logResizeGrip.Capture = true;
     }
@@ -3343,11 +3368,19 @@ internal sealed class LauncherForm : Form
 
         var delta = _logResizeStartScreenY - Cursor.Position.Y;
         var workingArea = Screen.FromControl(this).WorkingArea;
-        var maximumWindowHeight = Math.Max(MinimumSize.Height, workingArea.Bottom - Top - 8);
-        var targetWindowHeight = Math.Clamp(_logResizeStartHeight + delta, MinimumSize.Height, maximumWindowHeight);
-        var actualDelta = targetWindowHeight - _logResizeStartHeight;
-        Height = targetWindowHeight;
-        _logHost.Height = Math.Max(180, _logResizeStartLogHeight + actualDelta);
+        var requestedLogHeight = Math.Clamp(_logResizeStartLogHeight + delta, MinimumRuntimeLogHeight, MaximumRuntimeLogHeight);
+        var minimumWindowHeight = Math.Max(
+            MinimumSize.Height,
+            _logResizeStartBounds.Height - _logResizeStartLogHeight + MinimumRuntimeLogHeight);
+        var requestedWindowHeight = _logResizeStartBounds.Height + requestedLogHeight - _logResizeStartLogHeight;
+        var targetWindowHeight = Math.Clamp(requestedWindowHeight, minimumWindowHeight, workingArea.Height);
+        var actualDelta = targetWindowHeight - _logResizeStartBounds.Height;
+        var targetTop = Math.Clamp(
+            _logResizeStartBounds.Top,
+            workingArea.Top,
+            Math.Max(workingArea.Top, workingArea.Bottom - targetWindowHeight));
+        SetBounds(_logResizeStartBounds.Left, targetTop, _logResizeStartBounds.Width, targetWindowHeight);
+        _logHost.Height = Math.Clamp(_logResizeStartLogHeight + actualDelta, MinimumRuntimeLogHeight, MaximumRuntimeLogHeight);
     }
 
     private void EndLogWindowResize(object? sender, MouseEventArgs eventArgs)
@@ -3364,9 +3397,25 @@ internal sealed class LauncherForm : Form
         }
         if (_logHost is not null)
         {
-            _settings.RuntimeLogHeight = Math.Clamp(_logHost.Height, 180, 480);
+            _settings.RuntimeLogHeight = Math.Clamp(_logHost.Height, MinimumRuntimeLogHeight, MaximumRuntimeLogHeight);
             SaveSettings(_settings);
         }
+    }
+
+    private void ApplyPreferredWindowBounds()
+    {
+        if (_initialWindowBoundsApplied)
+        {
+            return;
+        }
+
+        _initialWindowBoundsApplied = true;
+        var workingArea = Screen.FromControl(this).WorkingArea;
+        var targetWidth = Math.Min(1440, workingArea.Width);
+        var targetHeight = Math.Min(PreferredWindowHeight, workingArea.Height);
+        var targetLeft = workingArea.Left + Math.Max(0, (workingArea.Width - targetWidth) / 2);
+        var targetTop = Math.Max(workingArea.Top, workingArea.Bottom - targetHeight);
+        SetBounds(targetLeft, targetTop, targetWidth, targetHeight);
     }
 
     private bool CanUpdateSelectedPlugin()
@@ -4355,8 +4404,8 @@ internal sealed class LauncherForm : Form
     {
         Text = "BaChen AI Launcher";
         StartPosition = FormStartPosition.CenterScreen;
-        MinimumSize = new Size(1280, 900);
-        Size = new Size(1440, 1020);
+        MinimumSize = new Size(1280, 980);
+        Size = new Size(1440, PreferredWindowHeight);
         Font = new Font("Microsoft YaHei UI", 10F);
         BackColor = Color.FromArgb(229, 237, 234);
         _pluginItems.Clear();
@@ -4405,17 +4454,27 @@ internal sealed class LauncherForm : Form
         _logHost = new Panel
         {
             Dock = DockStyle.Bottom,
-            Height = Math.Clamp(_settings.RuntimeLogHeight, 180, 480),
+            Height = Math.Clamp(_settings.RuntimeLogHeight, MinimumRuntimeLogHeight, MaximumRuntimeLogHeight),
             BackColor = BackColor,
-            Padding = new Padding(12, 10, 12, 8)
+            Padding = new Padding(12, 8, 12, 8)
         };
         _logResizeGrip = new Panel
         {
             Dock = DockStyle.Top,
-            Height = 6,
+            Height = 12,
             Cursor = Cursors.SizeNS,
-            BackColor = Color.FromArgb(190, 211, 205)
+            BackColor = Color.FromArgb(205, 223, 217)
         };
+        _logResizeGrip.Paint += (_, paintArgs) =>
+        {
+            var centerY = _logResizeGrip.ClientSize.Height / 2;
+            var left = Math.Max(18, (_logResizeGrip.ClientSize.Width - 64) / 2);
+            using var pen = new Pen(Color.FromArgb(123, 161, 153), 2F);
+            paintArgs.Graphics.DrawLine(pen, left, centerY, left + 64, centerY);
+        };
+        _logResizeGrip.MouseEnter += (_, _) => _logResizeGrip.BackColor = Color.FromArgb(178, 211, 201);
+        _logResizeGrip.MouseLeave += (_, _) => _logResizeGrip.BackColor = Color.FromArgb(205, 223, 217);
+        _toolTip.SetToolTip(_logResizeGrip, L("拖动以调整运行日志高度", "Drag to resize the runtime log"));
         _logResizeGrip.MouseDown += BeginLogWindowResize;
         _logResizeGrip.MouseMove += ResizeLogWindow;
         _logResizeGrip.MouseUp += EndLogWindowResize;
@@ -4577,6 +4636,7 @@ internal sealed class LauncherForm : Form
             BorderColor = Color.FromArgb(202, 218, 213),
             BorderWidth = 1
         };
+        _pluginPanel = pluginPanel;
         pluginPanel.Controls.Add(CreateText(L("已安装插件", "Installed plugins"), new Rectangle(24, 18, 250, 34), 14F, Theme.Ink, FontStyle.Bold));
         _pluginEntries = BuildPluginEntries();
         _pluginCountLabel = CreateText(string.Empty, new Rectangle(26, 52, 340, 24), 8.5F, Theme.Muted, FontStyle.Regular);
@@ -4776,8 +4836,22 @@ internal sealed class LauncherForm : Form
             LauncherVersion,
             _useEnglish,
             CreateInlineSettingsCard);
-        detailPanel.Controls.Add(_settingsWorkspace);
         mainShell.Controls.Add(detailPanel, 2, 0);
+
+        var settingsPanel = new RoundedPanel
+        {
+            Dock = DockStyle.Fill,
+            Margin = Padding.Empty,
+            FillColor = Color.White,
+            CornerRadius = 16,
+            BorderColor = Color.FromArgb(202, 218, 213),
+            BorderWidth = 1,
+            Visible = false
+        };
+        _settingsPanel = settingsPanel;
+        settingsPanel.Controls.Add(_settingsWorkspace);
+        mainShell.Controls.Add(settingsPanel, 1, 0);
+        mainShell.SetColumnSpan(settingsPanel, 2);
 
         Controls.Add(mainShell);
         Controls.Add(statusStrip);
