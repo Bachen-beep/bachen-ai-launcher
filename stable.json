@@ -1,13 +1,13 @@
 {
-  "Version": "0.16.39",
+  "Version": "0.16.40",
   "MinimumCompatibleVersion": "0.11.0",
-  "DownloadUrl": "https://github.com/Bachen-beep/bachen-ai-launcher/releases/download/v0.16.39/BaChen.AI.Launcher.exe",
-  "Sha256": "5A821DD43D26B6B6DBC56380F317343E17FD025D0770B569C1C35C789792DC30",
-  "ReleaseNotesUrl": "https://github.com/Bachen-beep/bachen-ai-launcher/releases/tag/v0.16.39",
-  "PublishedAt": "2026-08-05T03:07:32.7906629+00:00",
+  "DownloadUrl": "https://github.com/Bachen-beep/bachen-ai-launcher/releases/download/v0.16.40/BaChen.AI.Launcher.exe",
+  "Sha256": "4EE7A5E5D3621217098B9BC1797351119C56D7550677B126E373982F735D937E",
+  "ReleaseNotesUrl": "https://github.com/Bachen-beep/bachen-ai-launcher/releases/tag/v0.16.40",
+  "PublishedAt": "2026-08-05T07:15:08.4245714+00:00",
   "Signature": {
     "KeyId": "bachen-launcher-release-2026",
     "Algorithm": "RSA-SHA256",
-    "Value": "w\u002BeMusu9GlIOqKSE8oaVVteTqtWHSUes\u002BznIT4UCFtjyb9AwxfA4DZaI/zwVp4QLZXni3f\u002BsZJuriymVRvGZ9hzw4w0Yhs8DC/PxXwYtcbYn7bCw\u002Btb3qM3/27g8TJptxUPdEECfdDiYHHOOna1cLpsFeUf6Ad8Ej3nqCjm9w8CBMxDqlmX1Bnpw77MVMCjvaCP3XxO3XA\u002Bgz4fDdOEyyWy0fTWWyy/0Faq9ekYXfcwgeRqz\u002BudAw9HH2OG0VjKTm0C34\u002BY/mhchZW\u002BnGN4qhUJ7WpoC/E28mlNADqCE8YkbhT53qb2CuWs5y92fsluQ0wGW1BD47dZWDSc8UA5KgNguzK1i1FTsRo8Uqo0cCvJk1vss0M65BqOJ2aBdB\u002BTrAg6Ok9dNp89ta7RUPcIDk/xgCH49klf357SqoDHYdxxhRpn8VTIKebNO0Hu7ZX64DrL4S86SCrNIvaXO0IwjGrNTzxq19MWlhqiF0OrPCy23IwuWuYlXFI/MI/q1\u002BP7f"
+    "Value": "ddo\u002BvjwLZlWZ/qIp4YMO4n5EYP6EkLSnhwpD2JLMp\u002B9r3\u002BDMJKJ3w\u002BthfmGR0SaT3kgwQC6tIfT60gZiOseveuKsC/Y3rTFozTIX5Lfh2IG\u002Bsh97VxaRMmrfN/2zMgmVtyS3LDUioHtmyfRaGL1UyeeIYNRIv8rNp/CURGLMduek0R8zs7w3\u002BkaMcdOsZArQZ9fIOeLZ/1XR6n8C0rCetGTt/TPwyHWRSf//DWyMHzFT\u002B3J1mHqnhDMuslvo4/LQzBArkp2fe1LSvqAdHb6slsrXRfbVdG58JWM6xtteceBeHz6fpJ\u002BVvIIVosvgkZXeEkVKX4AISVqd1VKeEZoNmkkR\u002BvqucL80J6XR5eQChpcpNS2C0/vSb\u002BOF5LYic3ZOXB5YLTtUilCE65JV/5RApoQ13tjxYj3M5O4u7PJXrp0NX4C8TqpXt7x6iDzWLkGIoZ3iGccSvWD/\u002BxA5i2mje5Yl\u002BPyVZkBt2tozLUyXsYvUzOQN2OWsjgy03G0mprsu"
   }
 }
