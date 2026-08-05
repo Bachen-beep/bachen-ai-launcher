@@ -1863,13 +1863,18 @@ internal sealed class LauncherForm : Form
         }
 
         _updateBusy = true;
+        _settingsWorkspace?.ReportProgress(null, "Checking plugin source updates");
+        var checkFailed = false;
         SetRuntimePhase("正在检查 GitHub 源码更新", "Checking GitHub source updates");
         AppendLocalizedLog("正在检查 GitHub 源码更新……", "Checking GitHub source updates...");
         try
         {
             var checks = new List<SourceUpdateCheck>();
-            foreach (var source in _updateSources)
+            var totalSources = Math.Max(1, _updateSources.Length);
+            for (var sourceIndex = 0; sourceIndex < _updateSources.Length; sourceIndex++)
             {
+                var source = _updateSources[sourceIndex];
+                _settingsWorkspace?.ReportProgress(sourceIndex * 100 / totalSources, $"Checking {source.DisplayName}");
                 checks.Add(await FetchUpdateCheckAsync(source));
             }
 
@@ -1899,11 +1904,17 @@ internal sealed class LauncherForm : Form
                 summary += Environment.NewLine + Environment.NewLine + L("请选择有更新的插件，然后点击“启动插件”旁的“更新插件”。", "Select a plugin with an available update, then click Update plugin next to Launch plugin.");
             }
             AppendLog(summary.Replace(Environment.NewLine, " | "));
+            _settingsWorkspace?.ReportProgress(
+                100,
+                checks.Any(check => check.UpdateAvailable)
+                    ? $"Found {checks.Count(check => check.UpdateAvailable)} plugin source update(s)"
+                    : "Plugin sources are up to date");
             SetRuntimePhase("更新检查完成", "Update check complete");
             MessageBox.Show(summary, L("GitHub 更新检查", "GitHub update check"), MessageBoxButtons.OK, MessageBoxIcon.Information);
         }
         catch (Exception ex)
         {
+            checkFailed = true;
             AppendLocalizedLog($"检查更新失败：{ex.Message}", $"Update check failed: {ex.Message}");
             SetRuntimePhase("更新检查失败", "Update check failed");
             MessageBox.Show(ex.Message, L("无法检查更新", "Unable to check updates"), MessageBoxButtons.OK, MessageBoxIcon.Error);
@@ -1911,6 +1922,9 @@ internal sealed class LauncherForm : Form
         finally
         {
             _updateBusy = false;
+            _settingsWorkspace?.CompleteProgress(
+                checkFailed ? "Plugin update check failed" : "Plugin update check complete",
+                checkFailed);
         }
     }
 
@@ -4883,7 +4897,8 @@ internal sealed class LauncherForm : Form
             BuildSettingsCategories(),
             LauncherVersion,
             _useEnglish,
-            CreateInlineSettingsCard);
+            CreateInlineSettingsCard,
+            CheckUpdatesAsync);
         mainShell.Controls.Add(detailPanel, 2, 0);
 
         var settingsPanel = new RoundedPanel

@@ -7,6 +7,7 @@ internal sealed class SettingsWorkspace : Panel
     private readonly IReadOnlyList<MaintenanceCategoryDefinition> _categories;
     private readonly bool _useEnglish;
     private readonly Func<Control> _createSettingsCard;
+    private readonly Func<Task>? _checkPluginUpdates;
     private readonly Panel _navigation = new();
     private readonly Panel _content = new();
     private readonly Panel _actionList = new();
@@ -28,11 +29,13 @@ internal sealed class SettingsWorkspace : Panel
         IReadOnlyList<MaintenanceCategoryDefinition> categories,
         string launcherVersion,
         bool useEnglish,
-        Func<Control> createSettingsCard)
+        Func<Control> createSettingsCard,
+        Func<Task>? checkPluginUpdates = null)
     {
         _categories = categories;
         _useEnglish = useEnglish;
         _createSettingsCard = createSettingsCard;
+        _checkPluginUpdates = checkPluginUpdates;
         Dock = DockStyle.Fill;
         BackColor = Color.White;
         Visible = false;
@@ -191,6 +194,20 @@ internal sealed class SettingsWorkspace : Panel
                 : Color.FromArgb(28, 91, 87);
         }
         var category = _categories[index];
+        IReadOnlyList<MaintenanceActionDefinition> actions = category.Actions;
+        if (index == 1 && _checkPluginUpdates is not null)
+        {
+            actions =
+            [
+                new MaintenanceActionDefinition(
+                    _useEnglish ? "Check plugin updates" : "检查插件更新",
+                    _useEnglish ? "Check every installed plugin source and show available updates." : "检查所有已安装插件的源码状态，并显示可用更新。",
+                    _useEnglish ? "Check updates" : "检查更新",
+                    Color.FromArgb(31, 121, 108),
+                    _checkPluginUpdates),
+                ..category.Actions
+            ];
+        }
         _categoryTitle.Text = category.Title;
         _categoryDescription.Text = category.Description;
         _actionList.SuspendLayout();
@@ -205,9 +222,9 @@ internal sealed class SettingsWorkspace : Panel
             _actionList.Controls.Add(settingsCard);
             top = settingsCard.Height + 10;
         }
-        for (var actionIndex = 0; actionIndex < category.Actions.Count; actionIndex++)
+        for (var actionIndex = 0; actionIndex < actions.Count; actionIndex++)
         {
-            var row = CreateActionRow(category.Actions[actionIndex]);
+            var row = CreateActionRow(actions[actionIndex]);
             row.Location = new Point(0, top + actionIndex * 86);
             _actionList.Controls.Add(row);
         }
@@ -279,7 +296,19 @@ internal sealed class SettingsWorkspace : Panel
         {
             return;
         }
-        var actions = _categories[_selectedCategory].Actions;
+        IReadOnlyList<MaintenanceActionDefinition> actions = _categories[_selectedCategory].Actions;
+        if (_selectedCategory == 1 && _checkPluginUpdates is not null)
+        {
+            actions = [
+                new MaintenanceActionDefinition(
+                    _useEnglish ? "Check plugin updates" : "检查插件更新",
+                    _useEnglish ? "Check every installed plugin source and show available updates." : "检查所有已安装插件的源码状态，并显示可用更新。",
+                    _useEnglish ? "Check updates" : "检查更新",
+                    Color.FromArgb(31, 121, 108),
+                    _checkPluginUpdates),
+                ..actions
+            ];
+        }
         for (var index = 0; index < Math.Min(actions.Count, _actionButtons.Count); index++)
         {
             _actionButtons[index].Enabled = !_busy && (actions[index].CanExecute?.Invoke() ?? true);
